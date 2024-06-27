@@ -55,7 +55,10 @@ async fn main() {
 
             let response = match command {
                 ServerCommand::Info(_) => todo!(),
-                ServerCommand::Msg(_) => todo!(),
+                ServerCommand::Msg(msg) => {
+                    log::info!("{msg:?}");
+                    continue;
+                },
                 ServerCommand::HMsg(_) => todo!(),
                 ServerCommand::Ping => ClientCommand::Pong,
                 ServerCommand::Pong => {

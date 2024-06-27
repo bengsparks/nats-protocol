@@ -76,6 +76,7 @@ impl tokio_util::codec::Decoder for ClientCodec {
                 src,
             ))
             .chain(HPubDecoder.bind(src))
+            .chain(PubDecoder.bind(src))
             .chain(ConnectDecoder.bind(src))
             .chain(SubDecoder.bind(src))
             .chain(UnsubDecoder.bind(src));
