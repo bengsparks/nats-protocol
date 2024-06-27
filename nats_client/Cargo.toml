@@ -1,0 +1,21 @@
+[package]
+name = "nats_client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.7", features = ["derive", "cargo"] }
+env_logger = "0.11.3"
+futures = "0.3.30"
+log = "0.4.21"
+nats_codec = { path = "../nats_codec" }
+nkeys = "0.4.1"
+
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }
+tokio-stream = { workspace = true, features = ["io-util"] } 
+tokio-util = { workspace = true, features = ["codec"] }

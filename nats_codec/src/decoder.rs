@@ -3,9 +3,9 @@ use tokio_util::bytes::{self, Buf};
 
 use crate::{
     decoding::{
-        ClientError as CE, CommandDecoder, CommandDecoderResult, ErrDecoder, HMsgDecoder,
-        HPubDecoder, InfoDecoder, MsgDecoder, OkDecoder, PingDecoder, PongDecoder, PubDecoder,
-        ServerError as SE, SubDecoder, UnsubDecoder,
+        ClientError as CE, CommandDecoder, CommandDecoderResult, ConnectDecoder, ErrDecoder,
+        HMsgDecoder, HPubDecoder, InfoDecoder, MsgDecoder, OkDecoder, PingDecoder, PongDecoder,
+        PubDecoder, ServerError as SE, SubDecoder, UnsubDecoder,
     },
     ClientCodec, ClientCommand,
 };
@@ -45,7 +45,6 @@ impl tokio_util::codec::Decoder for ServerCodec {
         match decode_chain {
             CommandDecoderResult::Advance((frame, consume)) => {
                 src.advance(consume);
-                dbg!(&src);
                 Ok(Some(frame))
             }
             CommandDecoderResult::FatalError(e) => Err(e),
@@ -62,27 +61,24 @@ impl tokio_util::codec::Decoder for ClientCodec {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let clamped_len = src.len().min(BUFSIZE_LIMIT);
 
-        if find(&src[..clamped_len], &CRLF).is_none() {
+        let Some(first_newline) = find(&src[..clamped_len], &CRLF) else {
             return if src.len() < BUFSIZE_LIMIT {
                 Ok(None)
             } else {
                 Err(CE::ExceedsSoftLength)
             };
-        }
+        };
 
-        let decode_chain = PubDecoder
+        let decode_chain: CommandDecoderResult<_, CE> = PingDecoder
             .decode(src)
-            .chain(HPubDecoder.bind(src))
-            .chain(SubDecoder.bind(src))
-            .chain(UnsubDecoder.bind(src))
-            .chain(<PingDecoder as CommandDecoder<_, CE>>::bind(
-                &PingDecoder,
-                src,
-            ))
             .chain(<PongDecoder as CommandDecoder<_, CE>>::bind(
                 &PongDecoder,
                 src,
-            ));
+            ))
+            .chain(HPubDecoder.bind(src))
+            .chain(ConnectDecoder.bind(src))
+            .chain(SubDecoder.bind(src))
+            .chain(UnsubDecoder.bind(src));
 
         match decode_chain {
             CommandDecoderResult::Advance((frame, consume)) => {
@@ -92,7 +88,10 @@ impl tokio_util::codec::Decoder for ClientCodec {
             }
             CommandDecoderResult::FatalError(e) => Err(e),
             CommandDecoderResult::FrameTooShort => Ok(None),
-            CommandDecoderResult::WrongDecoder => Err(CE::UnknownCommand),
+            CommandDecoderResult::WrongDecoder => {
+                src.advance(first_newline);
+                Err(CE::UnknownCommand)
+            }
         }
     }
 }

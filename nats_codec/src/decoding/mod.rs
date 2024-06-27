@@ -1,3 +1,4 @@
+mod connect;
 mod err;
 mod header;
 mod hmsg;
@@ -15,6 +16,7 @@ use memchr::memmem;
 use std::io;
 use tokio_util::bytes::{self, Buf};
 
+pub use connect::ConnectDecoder;
 pub use err::ErrDecoder;
 pub use hmsg::HMsgDecoder;
 pub use hpub::HPubDecoder;
@@ -35,6 +37,10 @@ pub trait CommandDecoder<T, E> {
     }
 
     fn decode(&self, buffer: &mut bytes::BytesMut) -> CommandDecoderResult<T, E> {
+        if buffer.len() < Self::PREFIX.len() {
+            return CommandDecoderResult::FrameTooShort;
+        };
+
         if buffer[..Self::PREFIX.len()].eq_ignore_ascii_case(Self::PREFIX) {
             buffer.advance(Self::PREFIX.len())
         } else {
@@ -87,6 +93,9 @@ pub enum ServerError {
 pub enum ClientError {
     #[error("Message is too long to fit into buffer")]
     ExceedsSoftLength,
+
+    #[error("CONNECT's body is malformed")]
+    BadConnect,
 
     #[error("SUB's body is malformed")]
     BadSub,

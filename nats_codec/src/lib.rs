@@ -5,7 +5,7 @@ mod decoding;
 
 mod encoder;
 
-pub const BUFSIZE_LIMIT: usize = u16::MAX as usize;
+pub(crate) const BUFSIZE_LIMIT: usize = u16::MAX as usize;
 
 const CR: u8 = 0x0D;
 const LF: u8 = 0x0A;
@@ -87,6 +87,27 @@ pub enum ServerCommand {
 
 pub struct ServerCodec;
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Connect {
+    pub verbose: bool,
+    pub pedantic: bool,
+    pub tls_required: bool,
+    pub auth_token: Option<String>,
+    pub user: Option<String>,
+    pub pass: Option<String>,
+    pub name: Option<String>,
+    pub lang: String,
+    pub version: String,
+    pub protocol: Option<u8>,
+    pub echo: Option<bool>,
+
+    pub sig: Option<String>,
+    pub jwt: Option<String>,
+    pub no_responders: Option<bool>,
+    pub headers: Option<bool>,
+    pub nkey: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pub {
     pub subject: String,
@@ -97,7 +118,7 @@ pub struct Pub {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientCommand {
-    Connect,
+    Connect(Connect),
     Pub(Pub),
     HPub,
     Sub(Sub),
@@ -214,12 +235,12 @@ mod hmsg {
 
 #[cfg(test)]
 mod pingpong {
-    use crate::ServerCodec;
+    use crate::{ClientCodec, ServerCodec};
     use tokio_stream::StreamExt;
     use tokio_util::codec::FramedRead;
 
     #[tokio::test]
-    async fn ping() {
+    async fn ping_server() {
         let mut reader = FramedRead::new(&b"PING\r\n"[..], ServerCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
@@ -229,11 +250,31 @@ mod pingpong {
     }
 
     #[tokio::test]
-    async fn pong() {
+    async fn pong_server() {
         let mut reader = FramedRead::new(&b"PONG\r\n"[..], ServerCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
             Some(crate::ServerCommand::Pong)
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn ping_client() {
+        let mut reader = FramedRead::new(&b"PING\r\n"[..], ClientCodec);
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::Ping)
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn pong_client() {
+        let mut reader = FramedRead::new(&b"PONG\r\n"[..], ClientCodec);
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::Pong)
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
     }
@@ -379,6 +420,43 @@ mod subscribe {
             Some(crate::ClientCommand::Unsub(crate::Unsub {
                 sid: "1".into(),
                 max_msgs: Some(5),
+            }))
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod connection {
+    use crate::ClientCodec;
+    use tokio_stream::StreamExt;
+    use tokio_util::codec::FramedRead;
+
+    #[tokio::test]
+    async fn connect() {
+        let mut reader = FramedRead::new(concat!(
+            r#"CONNECT {"verbose":false,"pedantic":false,"tls_required":false,"name":"","lang":"go","version":"1.2.2","protocol":1}"#, 
+            "\r\n"
+        ).as_bytes(), ClientCodec);
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::Connect(crate::Connect {
+                verbose: false,
+                pedantic: false,
+                tls_required: false,
+                auth_token: None,
+                user: None,
+                pass: None,
+                name: Some("".into()),
+                lang: "go".into(),
+                version: "1.2.2".into(),
+                protocol: Some(1),
+                echo: None,
+                sig: None,
+                jwt: None,
+                no_responders: None,
+                headers: None,
+                nkey: None
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);

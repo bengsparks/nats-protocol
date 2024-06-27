@@ -9,6 +9,6 @@ impl super::CommandDecoder<crate::ClientCommand, ClientError> for HPubDecoder {
         &self,
         buffer: &[u8],
     ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
-        todo!()
+        CommandDecoderResult::WrongDecoder
     }
 }
