@@ -56,7 +56,7 @@ async fn main() {
             let response = match command {
                 ServerCommand::Info(_) => todo!(),
                 ServerCommand::Msg(msg) => {
-                    log::info!("{msg:?}");
+                    log::info!("Server sent message: {msg:?}");
                     continue;
                 },
                 ServerCommand::HMsg(_) => todo!(),
@@ -148,7 +148,11 @@ async fn main() {
             .send(())
             .expect("Failed to send connection confirmation signal to subtasks");
         while let Some(command) = cmd_rcv.recv().await {
-            log::trace!("Client sent {command:?}");
+            if !matches!(command, ClientCommand::Ping | ClientCommand::Pong) {
+                log::info!("Client sent {command:?}");
+            } else {
+                log::trace!("Client sent {command:?}");
+            }
             sink.send(command)
                 .await
                 .expect("Failed to send command to server!");
