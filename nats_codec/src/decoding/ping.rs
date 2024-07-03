@@ -1,33 +1,29 @@
-use super::{slice_spliterator, ClientError, CommandDecoderResult, ServerError};
+use super::{slice_spliterator, ClientDecodeError, CommandDecoderResult, ServerDecodeError};
 
 pub struct PingDecoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerError> for PingDecoder {
-    const PREFIX: &'static [u8] = b"PING";
-
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for PingDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ServerCommand, ServerError> {
+    ) -> CommandDecoderResult<crate::ServerCommand, ServerDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((b"", end)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         CommandDecoderResult::Advance((crate::ServerCommand::Ping, end))
     }
 }
 
-impl super::CommandDecoder<crate::ClientCommand, ClientError> for PingDecoder {
-    const PREFIX: &'static [u8] = b"PING";
-
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for PingDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
+    ) -> CommandDecoderResult<crate::ClientCommand, ClientDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((b"", end)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         CommandDecoderResult::Advance((crate::ClientCommand::Ping, end))

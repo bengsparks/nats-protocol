@@ -1,4 +1,4 @@
-use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerError};
+use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct HMsgDecoder;
 
@@ -10,18 +10,16 @@ struct Metadata<'a> {
     total_bytes: usize,
 }
 
-impl super::CommandDecoder<crate::ServerCommand, ServerError> for HMsgDecoder {
-    const PREFIX: &'static [u8] = b"HMSG ";
-
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for HMsgDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ServerCommand, ServerError> {
+    ) -> CommandDecoderResult<crate::ServerCommand, ServerDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
 
         // Load fixed sized blocks, namely metadata and NATS version field; buffer if too short
         let Some((metadata, _)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         // Split metadata by space and gather 4 to 5 fields
@@ -50,7 +48,7 @@ impl super::CommandDecoder<crate::ServerCommand, ServerError> for HMsgDecoder {
                 (subject, sid, None, header_bytes, &metadata[last..])
             }
             _ => {
-                return CommandDecoderResult::FrameTooShort;
+                return CommandDecoderResult::FrameTooShort(None);
             }
         };
 
@@ -58,19 +56,19 @@ impl super::CommandDecoder<crate::ServerCommand, ServerError> for HMsgDecoder {
             std::str::from_utf8(header_bytes),
             std::str::from_utf8(total_bytes),
         ) else {
-            return CommandDecoderResult::FatalError(ServerError::BadHMsg);
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadHMsg);
         };
         let (Ok(header_bytes), Ok(total_bytes)) =
             (headers.parse::<usize>(), totals.parse::<usize>())
         else {
-            return CommandDecoderResult::FatalError(ServerError::BadHMsg);
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadHMsg);
         };
 
         if total_bytes <= header_bytes {
-            return CommandDecoderResult::FatalError(ServerError::BadHMsg);
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadHMsg);
         }
         if total_bytes > buffer.len() {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         }
 
         // Metadata parsing complete!
@@ -103,16 +101,8 @@ impl super::CommandDecoder<crate::ServerCommand, ServerError> for HMsgDecoder {
         };*/
         // crlf_iter.next();
 
-        let payload = if total_bytes > 0 {
-            let Some((p, len)) = crlf_iter.next() else {
-                return CommandDecoderResult::FatalError(ServerError::BadHMsg);
-            };
-            if len != total_bytes {
-                return CommandDecoderResult::FatalError(ServerError::BadHMsg);
-            }
-            Some(p)
-        } else {
-            None
+        let Some((payload, _)) = crlf_iter.next() else {
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadHMsg);
         };
 
         let parts = HMsgParts {
@@ -140,11 +130,11 @@ struct HMsgParts<'a> {
     header_bytes: usize,
     total_bytes: usize,
     headers: Option<&'a [u8]>,
-    payload: Option<&'a [u8]>,
+    payload: &'a [u8],
 }
 
 impl std::convert::TryFrom<HMsgParts<'_>> for crate::HMsg {
-    type Error = ServerError;
+    type Error = ServerDecodeError;
 
     fn try_from(value: HMsgParts<'_>) -> Result<Self, Self::Error> {
         let Ok(subject) = std::str::from_utf8(value.subject) else {
@@ -159,9 +149,13 @@ impl std::convert::TryFrom<HMsgParts<'_>> for crate::HMsg {
             return Err(Self::Error::BadMsg);
         };
 
-        let Ok(payload) = value.payload.map(std::str::from_utf8).transpose() else {
+        if value.total_bytes - value.header_bytes == 0
+            || value.payload.len() + 1 != value.total_bytes - value.header_bytes
+        {
             return Err(Self::Error::BadMsg);
-        };
+        }
+        let payload = (value.total_bytes - value.header_bytes != 1)
+            .then(|| tokio_util::bytes::Bytes::copy_from_slice(value.payload));
 
         Ok(crate::HMsg {
             subject: subject.into(),

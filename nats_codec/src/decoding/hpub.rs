@@ -1,14 +1,12 @@
-use super::{ClientError, CommandDecoderResult};
+use super::{ClientDecodeError, CommandDecoderResult};
 
 pub struct HPubDecoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientError> for HPubDecoder {
-    const PREFIX: &'static [u8] = b"HPUB ";
-
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for HPubDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
+    ) -> CommandDecoderResult<crate::ClientCommand, ClientDecodeError> {
         CommandDecoderResult::WrongDecoder
     }
 }

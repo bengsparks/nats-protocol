@@ -1,17 +1,15 @@
-use super::{slice_spliterator, CommandDecoderResult, ServerError};
+use super::{slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct OkDecoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerError> for OkDecoder {
-    const PREFIX: &'static [u8] = b"+OK";
-
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for OkDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ServerCommand, ServerError> {
+    ) -> CommandDecoderResult<crate::ServerCommand, ServerDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((b"", end)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         CommandDecoderResult::Advance((crate::ServerCommand::Ok, end))

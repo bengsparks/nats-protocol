@@ -1,17 +1,15 @@
-use super::{char_spliterator, slice_spliterator, ClientError, CommandDecoderResult};
+use super::{char_spliterator, slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
 pub struct PubDecoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientError> for PubDecoder {
-    const PREFIX: &'static [u8] = b"PUB ";
-
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for PubDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
+    ) -> CommandDecoderResult<crate::ClientCommand, ClientDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((metadata, _)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         let mut meta_splits = char_spliterator(metadata, b' ');
@@ -22,19 +20,19 @@ impl super::CommandDecoder<crate::ClientCommand, ClientError> for PubDecoder {
                 }
                 (Some((subject, last)), None, None) => (subject, None, &metadata[last..]),
                 _ => {
-                    return CommandDecoderResult::FatalError(ClientError::BadPub);
+                    return CommandDecoderResult::FatalError(ClientDecodeError::BadPub);
                 }
             };
 
         let Ok(decoded_bytes) = std::str::from_utf8(bytes) else {
-            return CommandDecoderResult::FatalError(ClientError::BadPub);
+            return CommandDecoderResult::FatalError(ClientDecodeError::BadPub);
         };
         let Ok(bytes) = decoded_bytes.parse::<usize>() else {
-            return CommandDecoderResult::FatalError(ClientError::BadPub);
+            return CommandDecoderResult::FatalError(ClientDecodeError::BadPub);
         };
 
         let Some((payload, end)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         let parts = PubParts {
@@ -62,27 +60,27 @@ struct PubParts<'a> {
 }
 
 impl std::convert::TryFrom<PubParts<'_>> for crate::Pub {
-    type Error = ClientError;
+    type Error = ClientDecodeError;
 
     fn try_from(value: PubParts<'_>) -> Result<Self, Self::Error> {
         let Ok(subject) = std::str::from_utf8(value.subject) else {
-            return Err(ClientError::BadPub);
+            return Err(ClientDecodeError::BadPub);
         };
 
         let Ok(reply_to) = value.reply_to.map(std::str::from_utf8).transpose() else {
-            return Err(ClientError::BadPub);
+            return Err(ClientDecodeError::BadPub);
         };
 
         let (bytes, payload) = match (value.bytes, value.payload) {
             (0, b"") => (value.bytes, None),
             (length, payload) if payload.len() == length => {
                 let Ok(p) = std::str::from_utf8(payload) else {
-                    return Err(ClientError::BadPub);
+                    return Err(ClientDecodeError::BadPub);
                 };
                 (value.bytes, Some(p))
             }
             _ => {
-                return Err(ClientError::BadPub);
+                return Err(ClientDecodeError::BadPub);
             }
         };
 

@@ -51,10 +51,10 @@ impl Writer {
             .send(())
             .expect("Failed to send connection confirmation signal to subtasks");
         while let Some(command) = self.command_receiver.recv().await {
-            if !matches!(command, ClientCommand::Ping | ClientCommand::Pong) {
-                log::info!("Client sent {command:?}");
-            } else {
+            if matches!(command, ClientCommand::Ping | ClientCommand::Pong) {
                 log::trace!("Client sent {command:?}");
+            } else {
+                log::info!("Client sent {command:?}");
             }
             sink.send(command)
                 .await

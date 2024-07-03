@@ -1,17 +1,15 @@
-use super::{char_spliterator, slice_spliterator, ClientError, CommandDecoderResult};
+use super::{char_spliterator, slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
 pub struct SubDecoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientError> for SubDecoder {
-    const PREFIX: &'static [u8] = b"SUB ";
-
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for SubDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
+    ) -> CommandDecoderResult<crate::ClientCommand, ClientDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((message, end)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         let mut spliterator = char_spliterator(message, b' ');
@@ -22,7 +20,7 @@ impl super::CommandDecoder<crate::ClientCommand, ClientError> for SubDecoder {
                 }
                 (Some((subject, last)), None, None) => (subject, None, &message[last..]),
                 _ => {
-                    return CommandDecoderResult::FatalError(ClientError::BadSub);
+                    return CommandDecoderResult::FatalError(ClientDecodeError::BadSub);
                 }
             };
 
@@ -48,7 +46,7 @@ struct SubParts<'a> {
 }
 
 impl std::convert::TryFrom<SubParts<'_>> for crate::Sub {
-    type Error = ClientError;
+    type Error = ClientDecodeError;
 
     fn try_from(value: SubParts<'_>) -> Result<Self, Self::Error> {
         let subject = std::str::from_utf8(value.subject).map_err(|_| Self::Error::BadSub)?;

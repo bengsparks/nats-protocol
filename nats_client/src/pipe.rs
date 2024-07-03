@@ -1,11 +1,10 @@
-use futures::SinkExt;
 use nats_codec::{ClientCodec, ClientCommand};
 use tokio::{
     net::unix::pipe,
     sync::{broadcast, mpsc},
     task::JoinHandle,
 };
-use tokio_stream::StreamExt;
+use tokio_stream::StreamExt as _;
 use tokio_util::codec::FramedRead;
 
 struct Pipe {
@@ -24,16 +23,32 @@ impl Pipe {
             .await
             .expect("Failed to receive confirmation to start sending messages from pipe");
 
-        let fifo = pipe::OpenOptions::new()
+        let mut fifo = pipe::OpenOptions::new()
             .open_receiver(path)
             .expect("Failed to read mkfifo file");
 
-        let mut stream = FramedRead::new(fifo, ClientCodec);
-        while let Ok(Some(command)) = stream.try_next().await {
-            self.command_sender
-                .send(command)
-                .await
-                .expect("Failed to pass command from file to command queue");
+        loop {
+            let mut stream = FramedRead::new(&mut fifo, ClientCodec);
+
+            loop {
+                let command = stream.try_next().await;
+                match command {
+                    Ok(Some(command)) => {
+                        self.command_sender
+                            .send(command)
+                            .await
+                            .expect("Failed to pass command from file to command queue");
+                    }
+                    Ok(None) => {
+                        log::error!("Stream has been closed, reopening...");
+                        break;
+                    }
+                    Err(e) => {
+                        log::error!("Decoding error: {e}");
+                        continue;
+                    }
+                }
+            }
         }
     }
 }

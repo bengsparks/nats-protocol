@@ -4,5 +4,8 @@ members = ["nats_client", "nats_codec", "nats_server"]
 
 [workspace.dependencies]
 tokio = { version = "1.38.0", default-features = false }
-tokio-stream = { version = "0.1.15" } 
+tokio-stream = { version = "0.1.15", default-features = false} 
 tokio-util = { version = "0.7.11", default-features = false }
+
+nats_codec = { path = "./nats_codec" }
+log = "0.4"

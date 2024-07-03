@@ -1,21 +1,19 @@
-use super::{slice_spliterator, CommandDecoderResult, ServerError};
+use super::{slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct InfoDecoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerError> for InfoDecoder {
-    const PREFIX: &'static [u8] = b"INFO ";
-
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for InfoDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ServerCommand, ServerError> {
+    ) -> CommandDecoderResult<crate::ServerCommand, ServerDecodeError> {
         let mut spliterator = slice_spliterator(buffer, &crate::CRLF);
 
         let Some((slice, ending)) = spliterator.next() else {
-            return CommandDecoderResult::FatalError(ServerError::BadInfo);
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadInfo);
         };
         let Ok(info) = serde_json::from_slice(slice) else {
-            return CommandDecoderResult::FatalError(ServerError::BadInfo);
+            return CommandDecoderResult::FatalError(ServerDecodeError::BadInfo);
         };
 
         CommandDecoderResult::Advance((crate::ServerCommand::Info(info), ending))

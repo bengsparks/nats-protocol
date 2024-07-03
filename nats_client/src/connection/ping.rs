@@ -4,12 +4,15 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// The connection must be kept alive by sending [`nats_codec::Ping`] regularly.
+/// This task may commence when [`nats_codec::Connect`] command has been received 
+/// by the NATS server.
 struct Ping {
     /// Receive notification when connection has been successfully established
     /// by exchanging `INFO` and `CONNECT.`
     connection_notifier: broadcast::Receiver<()>,
 
-    /// Pass queue of commands
+    /// Pass commands to 
     command_sender: mpsc::Sender<ClientCommand>,
 }
 
@@ -31,6 +34,7 @@ impl Ping {
     }
 }
 
+/// Spawn a [`self::Ping`] task and related resources using [`PingHandle::new`].
 pub struct PingHandle {
     pub task: JoinHandle<()>,
 }

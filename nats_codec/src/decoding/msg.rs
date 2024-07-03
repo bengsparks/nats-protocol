@@ -1,14 +1,12 @@
-use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerError};
+use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct MsgDecoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerError> for MsgDecoder {
-    const PREFIX: &'static [u8] = b"MSG ";
-
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for MsgDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ServerCommand, ServerError> {
+    ) -> CommandDecoderResult<crate::ServerCommand, ServerDecodeError> {
         let mut blockiter = slice_spliterator(buffer, &crate::CRLF);
 
         // MSG terminates the payload with a second CR-LF sequence to separate it from the prefix metadata.
@@ -16,7 +14,7 @@ impl super::CommandDecoder<crate::ServerCommand, ServerError> for MsgDecoder {
         let (Some((metadata_block, _)), Some((payload_block, msg_ending))) =
             (blockiter.next(), blockiter.next())
         else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         let mut spliterator = char_spliterator(metadata_block, b' ');
@@ -44,7 +42,7 @@ impl super::CommandDecoder<crate::ServerCommand, ServerError> for MsgDecoder {
                 payload: payload_block,
             },
             _ => {
-                return CommandDecoderResult::FatalError(self::ServerError::BadMsg);
+                return CommandDecoderResult::FatalError(self::ServerDecodeError::BadMsg);
             }
         };
 
@@ -66,7 +64,7 @@ struct MsgParts<'a> {
 }
 
 impl std::convert::TryFrom<MsgParts<'_>> for crate::Msg {
-    type Error = self::ServerError;
+    type Error = self::ServerDecodeError;
 
     fn try_from(value: MsgParts<'_>) -> Result<Self, Self::Error> {
         let Ok(subject) = std::str::from_utf8(value.subject) else {
@@ -90,23 +88,19 @@ impl std::convert::TryFrom<MsgParts<'_>> for crate::Msg {
             return Err(Self::Error::BadMsg);
         };
 
-        // Clamp to shorter value
-        let shorter = bytes.min(value.payload.len());
-        let Ok(payload) = (shorter != 0)
-            .then_some(value.payload)
-            .map(|b| &b[..shorter])
-            .map(std::str::from_utf8)
-            .transpose()
-        else {
+        if value.payload.len() + 1 != bytes {
             return Err(Self::Error::BadMsg);
-        };
+        }
+        let shorter = bytes.min(value.payload.len());
+        let payload =
+            (shorter != 0).then(|| tokio_util::bytes::Bytes::copy_from_slice(value.payload));
 
         Ok(crate::Msg {
             subject: subject.into(),
             sid: sid.into(),
             reply_to: reply_to.map(Into::into),
             bytes,
-            payload: payload.map(Into::into),
+            payload,
         })
     }
 }

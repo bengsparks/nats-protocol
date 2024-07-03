@@ -1,17 +1,15 @@
-use super::{slice_spliterator, ClientError, CommandDecoderResult};
+use super::{slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
 pub struct ConnectDecoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientError> for ConnectDecoder {
-    const PREFIX: &'static [u8] = b"CONNECT ";
-
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for ConnectDecoder {
     fn decode_body(
         &self,
         buffer: &[u8],
-    ) -> CommandDecoderResult<crate::ClientCommand, ClientError> {
+    ) -> CommandDecoderResult<crate::ClientCommand, ClientDecodeError> {
         let mut crlf_iter = slice_spliterator(buffer, &crate::CRLF);
         let Some((options, len)) = crlf_iter.next() else {
-            return CommandDecoderResult::FrameTooShort;
+            return CommandDecoderResult::FrameTooShort(None);
         };
 
         let parts = ConnectParts { options };
@@ -29,19 +27,9 @@ struct ConnectParts<'a> {
 }
 
 impl std::convert::TryFrom<ConnectParts<'_>> for crate::Connect {
-    type Error = ClientError;
+    type Error = ClientDecodeError;
 
     fn try_from(value: ConnectParts<'_>) -> Result<Self, Self::Error> {
-        let jd = &mut serde_json::Deserializer::from_slice(value.options);
-        let result: Result<crate::Connect, _> = serde_path_to_error::deserialize(jd);
-
-        match result {
-            Ok(connect) => return Ok(connect),
-            Err(err) => {
-                let path = err.path().to_string();
-                assert_eq!(path, "dependencies.serde.version");
-                return Err(Self::Error::BadConnect);
-            }
-        }
+        serde_json::from_slice(value.options).map_err(|_| Self::Error::BadConnect)
     }
 }

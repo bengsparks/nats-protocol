@@ -14,7 +14,6 @@ mod unsub;
 
 use memchr::memmem;
 use std::io;
-use tokio_util::bytes::{self, Buf};
 
 pub use connect::ConnectDecoder;
 pub use err::ErrDecoder;
@@ -30,31 +29,11 @@ pub use sub::SubDecoder;
 pub use unsub::UnsubDecoder;
 
 pub trait CommandDecoder<T, E> {
-    const PREFIX: &'static [u8];
-
-    fn bind(&self, buffer: &mut bytes::BytesMut) -> impl FnOnce() -> CommandDecoderResult<T, E> {
-        move || self.decode(buffer)
-    }
-
-    fn decode(&self, buffer: &mut bytes::BytesMut) -> CommandDecoderResult<T, E> {
-        if buffer.len() < Self::PREFIX.len() {
-            return CommandDecoderResult::FrameTooShort;
-        };
-
-        if buffer[..Self::PREFIX.len()].eq_ignore_ascii_case(Self::PREFIX) {
-            buffer.advance(Self::PREFIX.len())
-        } else {
-            return CommandDecoderResult::WrongDecoder;
-        };
-
-        self.decode_body(&buffer)
-    }
-
     fn decode_body(&self, buffer: &[u8]) -> CommandDecoderResult<T, E>;
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ServerError {
+pub enum ServerDecodeError {
     #[error("Message is too long to fit into buffer")]
     ExceedsSoftLength,
 
@@ -90,7 +69,7 @@ pub enum ServerError {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ClientError {
+pub enum ClientDecodeError {
     #[error("Message is too long to fit into buffer")]
     ExceedsSoftLength,
 
@@ -123,32 +102,17 @@ pub enum CommandDecoderResult<T, E> {
     /// Success: Frame consumed, `buffer` should be advanced.
     Advance((T, usize)),
 
-    /// Fatal error: `PREFIX` was matched, but an unrecoverable error occured thereafter.
+    /// Fatal error: prefix was matched, but an unrecoverable error occured thereafter.
     /// This frame should be dropped.
     FatalError(E),
 
     /// Nonfatal error: Buffer is shorter than full frame
     /// Decoder should read more buffer into memory and retry.
-    FrameTooShort,
+    FrameTooShort(Option<usize>),
 
-    /// Nonfatal error: the `PREFIX` could not be detected
+    /// Nonfatal error: the prefix could not be detected
     /// Decoder should try a different command.
     WrongDecoder,
-}
-
-impl<T, E> CommandDecoderResult<T, E> {
-    pub fn chain(self, decoder: impl FnOnce() -> CommandDecoderResult<T, E>) -> Self {
-        match self {
-            CommandDecoderResult::WrongDecoder => decoder(),
-
-            CommandDecoderResult::Advance((frame, bytes)) => {
-                CommandDecoderResult::Advance((frame, bytes))
-            }
-
-            CommandDecoderResult::FatalError(e) => CommandDecoderResult::FatalError(e),
-            CommandDecoderResult::FrameTooShort => CommandDecoderResult::FrameTooShort,
-        }
-    }
 }
 
 pub(crate) fn slice_spliterator<'a>(

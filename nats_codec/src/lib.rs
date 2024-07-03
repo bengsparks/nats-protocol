@@ -5,6 +5,8 @@ mod decoding;
 
 mod encoder;
 
+pub use decoding::{ClientDecodeError, ServerDecodeError};
+
 pub(crate) const BUFSIZE_LIMIT: usize = u16::MAX as usize;
 
 const CR: u8 = 0x0D;
@@ -45,7 +47,7 @@ pub struct Msg {
     pub sid: String,
     pub reply_to: Option<String>,
     pub bytes: usize,
-    pub payload: Option<String>,
+    pub payload: Option<tokio_util::bytes::Bytes>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -71,7 +73,7 @@ pub struct HMsg {
     pub header_bytes: usize,
     pub total_bytes: usize,
     pub headers: Option<HeaderMap>,
-    pub payload: Option<String>,
+    pub payload: Option<tokio_util::bytes::Bytes>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +85,38 @@ pub enum ServerCommand {
     Pong,
     Ok,
     Err(String),
+}
+
+pub struct Message {
+    pub subject: String,
+    pub sid: String,
+    pub reply_to: Option<String>,
+    pub headers: Option<HeaderMap>,
+    pub payload: Option<tokio_util::bytes::Bytes>,
+}
+
+impl std::convert::From<HMsg> for Message {
+    fn from(value: HMsg) -> Self {
+        Self {
+            subject: value.subject,
+            sid: value.sid,
+            reply_to: value.reply_to,
+            headers: value.headers,
+            payload: value.payload,
+        }
+    }
+}
+
+impl std::convert::From<Msg> for Message {
+    fn from(value: Msg) -> Self {
+        Self {
+            subject: value.subject,
+            sid: value.sid,
+            reply_to: value.reply_to,
+            headers: None,
+            payload: value.payload,
+        }
+    }
 }
 
 pub struct ServerCodec;

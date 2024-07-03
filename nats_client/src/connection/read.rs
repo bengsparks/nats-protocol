@@ -1,4 +1,6 @@
-use nats_codec::{ClientCommand, Info, ServerCodec, ServerCommand};
+use std::collections::HashMap;
+
+use nats_codec::{ClientCommand, Info, Message, ServerCodec, ServerCommand};
 use tokio::{
     io::BufReader,
     net::tcp::OwnedReadHalf,
@@ -8,6 +10,10 @@ use tokio::{
 use tokio_stream::StreamExt as _;
 use tokio_util::codec::FramedRead;
 
+/// When the server accepts a connection from the client, from the TCP stream,
+/// it will send information, configuration, and security requirements necessary for the
+/// client to successfully authenticate with the server and exchange messages.
+/// as a [`nats_codec::Info`] first.
 struct Reader {
     /// Incoming byte stream over TCP.
     tcp_stream: BufReader<OwnedReadHalf>,
@@ -24,6 +30,9 @@ struct Reader {
 
     /// Pass queue of commands
     command_sender: mpsc::Sender<ClientCommand>,
+
+    /// Send received messages to subscribers; SID -> subscriber channel
+    subscriber_map: HashMap<String, mpsc::Sender<Message>>,
 }
 
 impl Reader {
@@ -40,43 +49,56 @@ impl Reader {
             .send(info)
             .expect("Failed to send `INFO` to auth manager");
 
-        log::info!("Awaiting connection creation confirmation");
         self.connection_notifier
             .recv()
             .await
             .expect("Successful connection could not be established");
-        while let Ok(Some(command)) = stream.try_next().await {
-            log::trace!("Server sent {command:?}");
 
-            let response = match command {
-                ServerCommand::Info(_) => todo!(),
+        log::info!("Connection established, ready to read commands over TCP!");
+        while let Ok(Some(command)) = stream.try_next().await {
+            match command {
+                ServerCommand::Info(info) => {
+                    log::trace!("Server sent `INFO` command after initial connection {info:?}");
+                }
                 ServerCommand::Msg(msg) => {
                     log::info!("Server sent message: {msg:?}");
-                    continue;
+                    let Some(sender) = self.subscriber_map.get(&msg.sid) else {
+                        continue;
+                    };
+                    sender.send(msg.into()).await.unwrap()
                 }
-                ServerCommand::HMsg(_) => todo!(),
-                ServerCommand::Ping => ClientCommand::Pong,
+                ServerCommand::HMsg(msg) => {
+                    log::info!("Server sent message with headers: {msg:?}");
+                    let Some(sender) = self.subscriber_map.get(&msg.sid) else {
+                        continue;
+                    };
+                    sender.send(msg.into()).await.unwrap()
+                }
+                ServerCommand::Ping => self
+                    .command_sender
+                    .send(ClientCommand::Pong)
+                    .await
+                    .expect("Failed to send"),
+
                 ServerCommand::Pong => {
-                    continue;
                 }
                 ServerCommand::Ok => {
-                    continue;
+                    log::trace!("+OK received");
                 }
                 ServerCommand::Err(message) => {
                     log::error!("{message}");
-                    continue;
                 }
-            };
-            self.command_sender
-                .send(response)
-                .await
-                .expect("Failed to send");
+            }
         }
     }
 }
 
+/// Spawn a [`self::Reader`] task and related resources using [`ReaderHandle::new`].
 pub struct ReaderHandle {
+    /// Allow for one subtask to receive the `INFO` message when sent by the server.
     pub info_receiver: oneshot::Receiver<Info>,
+    /// Handle to the asynchronous task that reads from the provided TCP Stream.
+    /// This task terminates if the address connected to is not a NATS server, or it does not respond with an `INFO`
     pub task: JoinHandle<()>,
 }
 
@@ -93,6 +115,7 @@ impl ReaderHandle {
             info_sender,
             connection_notifier,
             command_sender,
+            subscriber_broadcast: HashMap::default()
         };
 
         Self {

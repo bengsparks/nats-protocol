@@ -3,9 +3,9 @@ use tokio_util::bytes::{self, Buf};
 
 use crate::{
     decoding::{
-        ClientError as CE, CommandDecoder, CommandDecoderResult, ConnectDecoder, ErrDecoder,
+        ClientDecodeError, CommandDecoder, CommandDecoderResult, ConnectDecoder, ErrDecoder,
         HMsgDecoder, HPubDecoder, InfoDecoder, MsgDecoder, OkDecoder, PingDecoder, PongDecoder,
-        PubDecoder, ServerError as SE, SubDecoder, UnsubDecoder,
+        PubDecoder, ServerDecodeError, SubDecoder, UnsubDecoder,
     },
     ClientCodec, ClientCommand,
 };
@@ -14,85 +14,109 @@ use super::{ServerCodec, ServerCommand, BUFSIZE_LIMIT, CRLF};
 
 impl tokio_util::codec::Decoder for ServerCodec {
     type Item = ServerCommand;
-    type Error = SE;
+    type Error = ServerDecodeError;
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let clamped_len = src.len().min(BUFSIZE_LIMIT);
+        let decoders: &[(&[u8], &dyn CommandDecoder<_, _>)] = &[
+            (b"PING", &PingDecoder),
+            (b"PONG", &PongDecoder),
+            (b"HMSG ", &HMsgDecoder),
+            (b"MSG ", &MsgDecoder),
+            (b"+OK", &OkDecoder),
+            (b"-ERR ", &ErrDecoder),
+            (b"INFO ", &InfoDecoder),
+        ];
 
-        if find(&src[..clamped_len], &CRLF).is_none() {
-            return if src.len() < BUFSIZE_LIMIT {
-                Ok(None)
-            } else {
-                Err(SE::ExceedsSoftLength)
-            };
-        }
-
-        let decode_chain = InfoDecoder
-            .decode(src)
-            .chain(MsgDecoder.bind(src))
-            .chain(HMsgDecoder.bind(src))
-            .chain(<PingDecoder as CommandDecoder<_, SE>>::bind(
-                &PingDecoder,
-                src,
-            ))
-            .chain(<PongDecoder as CommandDecoder<_, SE>>::bind(
-                &PongDecoder,
-                src,
-            ))
-            .chain(OkDecoder.bind(src))
-            .chain(ErrDecoder.bind(src));
-
-        match decode_chain {
-            CommandDecoderResult::Advance((frame, consume)) => {
-                src.advance(consume);
-                Ok(Some(frame))
-            }
-            CommandDecoderResult::FatalError(e) => Err(e),
-            CommandDecoderResult::FrameTooShort => Ok(None),
-            CommandDecoderResult::WrongDecoder => Err(SE::UnknownCommand),
-        }
+        decoding(src, decoders)
     }
 }
 
 impl tokio_util::codec::Decoder for ClientCodec {
     type Item = ClientCommand;
-    type Error = CE;
+    type Error = ClientDecodeError;
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let clamped_len = src.len().min(BUFSIZE_LIMIT);
+        let decoders: &[(&[u8], &dyn CommandDecoder<_, _>)] = &[
+            (b"PING", &PingDecoder),
+            (b"PONG", &PongDecoder),
+            (b"HPUB ", &HPubDecoder),
+            (b"PUB ", &PubDecoder),
+            (b"SUB ", &SubDecoder),
+            (b"UNSUB ", &UnsubDecoder),
+            (b"CONNECT ", &ConnectDecoder),
+        ];
 
-        let Some(first_newline) = find(&src[..clamped_len], &CRLF) else {
-            return if src.len() < BUFSIZE_LIMIT {
-                Ok(None)
-            } else {
-                Err(CE::ExceedsSoftLength)
-            };
+        decoding(src, decoders)
+    }
+}
+
+fn decoding<T, E: CommonDecodeError, D: CommandDecoder<T, E> + ?Sized>(
+    src: &mut bytes::BytesMut,
+    decoders: &[(&'static [u8], &D)],
+) -> Result<Option<T>, E> {
+    let clamped_len = src.len().min(BUFSIZE_LIMIT);
+    let Some(first_newline) = find(&src[..clamped_len], &CRLF) else {
+        return if src.len() < BUFSIZE_LIMIT {
+            Ok(None)
+        } else {
+            Err(E::exceeds_short_length())
         };
+    };
 
-        let decode_chain: CommandDecoderResult<_, CE> = PingDecoder
-            .decode(src)
-            .chain(<PongDecoder as CommandDecoder<_, CE>>::bind(
-                &PongDecoder,
-                src,
-            ))
-            .chain(HPubDecoder.bind(src))
-            .chain(PubDecoder.bind(src))
-            .chain(ConnectDecoder.bind(src))
-            .chain(SubDecoder.bind(src))
-            .chain(UnsubDecoder.bind(src));
+    for (prefix, decoder) in decoders {
+        if src.len() < prefix.len() {
+            src.reserve(prefix.len());
+            return Ok(None);
+        }
+        if !src[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            continue;
+        }
 
-        match decode_chain {
+        let (_matched, body) = src.split_at(prefix.len());
+        match decoder.decode_body(body) {
             CommandDecoderResult::Advance((frame, consume)) => {
-                src.advance(consume);
+                src.advance(consume + prefix.len());
                 dbg!(&src);
-                Ok(Some(frame))
+                return Ok(Some(frame));
             }
-            CommandDecoderResult::FatalError(e) => Err(e),
-            CommandDecoderResult::FrameTooShort => Ok(None),
+            CommandDecoderResult::FatalError(e) => return Err(e),
+            CommandDecoderResult::FrameTooShort(Some(required)) => {
+                src.reserve(required);
+                return Ok(None);
+            },
+            CommandDecoderResult::FrameTooShort(None) => return Ok(None),
             CommandDecoderResult::WrongDecoder => {
-                src.advance(first_newline);
-                Err(CE::UnknownCommand)
+                continue;
             }
         }
+    }
+
+    log::error!("Unknown command encountered; skipping until after next CRLF");
+    src.advance(first_newline + 1);
+    Err(E::unknown_command())
+}
+
+trait CommonDecodeError {
+    fn exceeds_short_length() -> Self;
+    fn unknown_command() -> Self;
+}
+
+impl CommonDecodeError for ClientDecodeError {
+    fn exceeds_short_length() -> Self {
+        Self::ExceedsSoftLength
+    }
+
+    fn unknown_command() -> Self {
+        Self::UnknownCommand
+    }
+}
+
+impl CommonDecodeError for ServerDecodeError {
+    fn exceeds_short_length() -> Self {
+        Self::ExceedsSoftLength
+    }
+
+    fn unknown_command() -> Self {
+        Self::UnknownCommand
     }
 }

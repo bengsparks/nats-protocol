@@ -32,7 +32,10 @@ impl tokio_util::codec::Encoder<crate::ClientCommand> for crate::ClientCodec {
 
 const CRLF: &str = "\r\n";
 
-fn connect(connect: crate::Connect, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
+fn connect(
+    connect: crate::Connect,
+    dst: &mut tokio_util::bytes::BytesMut,
+) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
 
     write!(writer, "CONNECT ")?;
@@ -49,9 +52,12 @@ fn publish(p: crate::Pub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), s
     let bytes = p.bytes;
 
     match (p.reply_to, p.payload) {
-        (Some(reply_to), Some(payload)) => write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}{payload}{CRLF}")?,
+        (Some(reply_to), Some(payload)) => write!(
+            writer,
+            "PUB {subject} {reply_to} {bytes}{CRLF}{payload}{CRLF}"
+        )?,
         (Some(reply_to), None) => write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}{CRLF}")?,
-        (None, Some(payload)) =>  write!(writer, "PUB {subject} {bytes}{CRLF}{payload}{CRLF}")?,
+        (None, Some(payload)) => write!(writer, "PUB {subject} {bytes}{CRLF}{payload}{CRLF}")?,
         (None, None) => write!(writer, "PUB {subject} {bytes}{CRLF}{CRLF}")?,
     }
 
@@ -72,7 +78,10 @@ fn subscribe(s: crate::Sub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(),
     Ok(())
 }
 
-fn unsubscribe(u: crate::Unsub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
+fn unsubscribe(
+    u: crate::Unsub,
+    dst: &mut tokio_util::bytes::BytesMut,
+) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
 
     let sid = u.sid;
@@ -83,7 +92,6 @@ fn unsubscribe(u: crate::Unsub, dst: &mut tokio_util::bytes::BytesMut) -> Result
 
     Ok(())
 }
-
 
 fn ping(dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
