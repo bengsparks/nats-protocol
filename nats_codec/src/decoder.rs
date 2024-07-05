@@ -3,9 +3,8 @@ use tokio_util::bytes::{self, Buf};
 
 use crate::{
     decoding::{
-        ClientDecodeError, CommandDecoder, CommandDecoderResult, ConnectDecoder, ErrDecoder,
-        HMsgDecoder, HPubDecoder, InfoDecoder, MsgDecoder, OkDecoder, PingDecoder, PongDecoder,
-        PubDecoder, ServerDecodeError, SubDecoder, UnsubDecoder,
+        connect, err, hmsg, hpub, info, msg, ok, ping, pong, publish, sub, unsub,
+        ClientDecodeError, CommandDecoder, CommandDecoderResult, ServerDecodeError,
     },
     ClientCodec, ClientCommand,
 };
@@ -18,13 +17,13 @@ impl tokio_util::codec::Decoder for ServerCodec {
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let decoders: &[(&[u8], &dyn CommandDecoder<_, _>)] = &[
-            (b"PING", &PingDecoder),
-            (b"PONG", &PongDecoder),
-            (b"HMSG ", &HMsgDecoder),
-            (b"MSG ", &MsgDecoder),
-            (b"+OK", &OkDecoder),
-            (b"-ERR ", &ErrDecoder),
-            (b"INFO ", &InfoDecoder),
+            (b"PING", &ping::Decoder),
+            (b"PONG", &pong::Decoder),
+            (b"HMSG ", &hmsg::Decoder),
+            (b"MSG ", &msg::Decoder),
+            (b"+OK", &ok::Decoder),
+            (b"-ERR ", &err::Decoder),
+            (b"INFO ", &info::Decoder),
         ];
 
         decoding(src, decoders)
@@ -37,13 +36,13 @@ impl tokio_util::codec::Decoder for ClientCodec {
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let decoders: &[(&[u8], &dyn CommandDecoder<_, _>)] = &[
-            (b"PING", &PingDecoder),
-            (b"PONG", &PongDecoder),
-            (b"HPUB ", &HPubDecoder),
-            (b"PUB ", &PubDecoder),
-            (b"SUB ", &SubDecoder),
-            (b"UNSUB ", &UnsubDecoder),
-            (b"CONNECT ", &ConnectDecoder),
+            (b"PING", &ping::Decoder),
+            (b"PONG", &pong::Decoder),
+            (b"HPUB ", &hpub::Decoder),
+            (b"PUB ", &publish::Decoder),
+            (b"SUB ", &sub::Decoder),
+            (b"UNSUB ", &unsub::Decoder),
+            (b"CONNECT ", &connect::Decoder),
         ];
 
         decoding(src, decoders)

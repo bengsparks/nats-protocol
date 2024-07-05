@@ -73,13 +73,15 @@ pub struct HMsg {
     pub reply_to: Option<String>,
     pub header_bytes: usize,
     pub total_bytes: usize,
-    pub headers: Option<HeaderMap>,
+    pub headers: HeaderMap,
     pub payload: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerCommand {
-    Info(Info),
+    // Clippy notes that `Info` contains at least 352 bytes, far more than the other variants
+    // which is we `Box` it here
+    Info(Box<Info>),
     Msg(Msg),
     HMsg(HMsg),
     Ping,
@@ -93,7 +95,7 @@ pub struct Message {
     pub subject: String,
     pub sid: String,
     pub reply_to: Option<String>,
-    pub headers: Option<HeaderMap>,
+    pub headers: HeaderMap,
     pub payload: Bytes,
 }
 
@@ -115,7 +117,7 @@ impl std::convert::From<Msg> for Message {
             subject: value.subject,
             sid: value.sid,
             reply_to: value.reply_to,
-            headers: None,
+            headers: HeaderMap(HashMap::new()),
             payload: value.payload,
         }
     }
@@ -223,6 +225,8 @@ mod msg {
 
 #[cfg(test)]
 mod hmsg {
+    use std::collections::HashMap;
+
     use crate::ServerCodec;
     use tokio_stream::StreamExt;
     use tokio_util::bytes::Bytes;
@@ -242,7 +246,7 @@ mod hmsg {
                 reply_to: None,
                 header_bytes: 34,
                 total_bytes: 45,
-                headers: Some("FoodGroup: vegetable".parse().unwrap()),
+                headers: crate::HeaderMap(HashMap::new()),
                 payload: Bytes::from_static(b"Hello World"),
             }))
         );
@@ -263,7 +267,7 @@ mod hmsg {
                 reply_to: Some("BAZ.69".into()),
                 header_bytes: 34,
                 total_bytes: 45,
-                headers: Some("FoodGroup: vegetable".parse().unwrap()),
+                headers: crate::HeaderMap(HashMap::new()),
                 payload: Bytes::from_static(b"Hello World"),
             }))
         );

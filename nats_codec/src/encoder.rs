@@ -40,7 +40,7 @@ fn connect(
 
     write!(writer, "CONNECT ")?;
     serde_json::to_writer(&mut writer, &connect)?;
-    write!(writer, "{}", CRLF)?;
+    write!(writer, "{CRLF}")?;
 
     Ok(())
 }
@@ -52,17 +52,14 @@ fn publish(p: crate::Pub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), s
     let bytes = p.bytes;
     let payload = p.payload;
 
-    match p.reply_to {
-        Some(reply_to) => {
-            write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}")?;
-            writer.write_all(&payload)?;
-            write!(writer, "{CRLF}")?;
-        }
-        None => {
-            write!(writer, "PUB {subject} {bytes}{CRLF}")?;
-            writer.write_all(&payload)?;
-            write!(writer, "{CRLF}")?;
-        }
+    if let Some(reply_to) = p.reply_to {
+        write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}")?;
+        writer.write_all(&payload)?;
+        write!(writer, "{CRLF}")?;
+    } else {
+        write!(writer, "PUB {subject} {bytes}{CRLF}")?;
+        writer.write_all(&payload)?;
+        write!(writer, "{CRLF}")?;
     }
 
     Ok(())
@@ -99,14 +96,14 @@ fn unsubscribe(
 
 fn ping(dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
-    write!(writer, "PING{}", CRLF)?;
+    write!(writer, "PING{CRLF}")?;
 
     Ok(())
 }
 
 fn pong(dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
-    write!(writer, "PONG{}", CRLF)?;
+    write!(writer, "PONG{CRLF}")?;
 
     Ok(())
 }

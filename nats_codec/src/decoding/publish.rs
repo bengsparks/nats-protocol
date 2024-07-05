@@ -2,9 +2,9 @@ use tokio_util::bytes::Bytes;
 
 use super::{char_spliterator, slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
-pub struct PubDecoder;
+pub struct Decoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for PubDecoder {
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],

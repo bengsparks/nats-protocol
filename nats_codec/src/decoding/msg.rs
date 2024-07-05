@@ -2,9 +2,9 @@ use tokio_util::bytes::Bytes;
 
 use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
-pub struct MsgDecoder;
+pub struct Decoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for MsgDecoder {
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],
@@ -81,10 +81,9 @@ impl std::convert::TryFrom<MsgParts<'_>> for crate::Msg {
             return Err(Self::Error::BadMsg);
         };
 
-        let Ok(bytes) = utf8_bytes.parse::<u64>() else {
+        let Ok(bytes) = utf8_bytes.parse::<usize>() else {
             return Err(Self::Error::BadMsg);
         };
-        let bytes = bytes as usize;
 
         let Ok(reply_to) = value.reply_to.map(std::str::from_utf8).transpose() else {
             return Err(Self::Error::BadMsg);

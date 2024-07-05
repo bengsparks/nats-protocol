@@ -1,8 +1,8 @@
 use super::{slice_spliterator, ClientDecodeError, CommandDecoderResult, ServerDecodeError};
 
-pub struct PingDecoder;
+pub struct Decoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for PingDecoder {
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],
@@ -16,7 +16,7 @@ impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for PingDeco
     }
 }
 
-impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for PingDecoder {
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],

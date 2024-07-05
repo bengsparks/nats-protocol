@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use tokio_util::bytes::Bytes;
 
 use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
-pub struct HMsgDecoder;
+pub struct Decoder;
 
 struct Metadata<'a> {
     subject: &'a [u8],
@@ -12,7 +14,7 @@ struct Metadata<'a> {
     total_bytes: usize,
 }
 
-impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for HMsgDecoder {
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],
@@ -113,7 +115,7 @@ impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for HMsgDeco
             reply_to: metadata.reply_to,
             header_bytes: metadata.header_bytes,
             total_bytes: metadata.total_bytes,
-            headers: None,
+            headers: &b""[..],
             payload,
         };
         let hmsg = match parts.try_into() {
@@ -131,7 +133,7 @@ struct HMsgParts<'a> {
     reply_to: Option<&'a [u8]>,
     header_bytes: usize,
     total_bytes: usize,
-    headers: Option<&'a [u8]>,
+    headers: &'a [u8],
     payload: &'a [u8],
 }
 
@@ -157,13 +159,15 @@ impl std::convert::TryFrom<HMsgParts<'_>> for crate::HMsg {
             return Err(Self::Error::BadMsg);
         }
 
+        let _ = value.headers;
+
         Ok(crate::HMsg {
             subject: subject.into(),
             sid: sid.into(),
             reply_to: reply_to.map(Into::into),
             header_bytes: value.header_bytes,
             total_bytes: value.total_bytes,
-            headers: value.headers.map(Into::into),
+            headers: crate::HeaderMap(HashMap::new()),
             payload: Bytes::copy_from_slice(value.payload),
         })
     }

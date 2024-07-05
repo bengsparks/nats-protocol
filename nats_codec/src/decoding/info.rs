@@ -1,8 +1,8 @@
 use super::{slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
-pub struct InfoDecoder;
+pub struct Decoder;
 
-impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for InfoDecoder {
+impl super::CommandDecoder<crate::ServerCommand, ServerDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],

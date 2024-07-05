@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 /*
 use winnow::{combinator::seq, token::{literal, take_until}, Parser};
 
@@ -39,6 +37,7 @@ impl super::CommandDecoder<crate::HeaderMap> for HeadersDecoder {
  */
 
 // Dummy impl; definitely not safe!
+/*
 fn parse_header<'a>(slice: &mut &'a [u8]) -> Result<crate::Header, ()> {
     Err(())
 }
@@ -56,3 +55,4 @@ impl std::str::FromStr for crate::HeaderMap {
         Ok(Self(HashMap::new()))
     }
 }
+*/

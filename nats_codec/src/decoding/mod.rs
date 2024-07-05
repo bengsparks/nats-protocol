@@ -1,32 +1,19 @@
-mod connect;
-mod err;
+pub mod connect;
+pub mod err;
 mod header;
-mod hmsg;
-mod hpub;
-mod info;
-mod msg;
-mod ok;
-mod ping;
-mod pong;
-mod r#pub;
-mod sub;
-mod unsub;
+pub mod hmsg;
+pub mod hpub;
+pub mod info;
+pub mod msg;
+pub mod ok;
+pub mod ping;
+pub mod pong;
+pub mod publish;
+pub mod sub;
+pub mod unsub;
 
 use memchr::memmem;
 use std::io;
-
-pub use connect::ConnectDecoder;
-pub use err::ErrDecoder;
-pub use hmsg::HMsgDecoder;
-pub use hpub::HPubDecoder;
-pub use info::InfoDecoder;
-pub use msg::MsgDecoder;
-pub use ok::OkDecoder;
-pub use ping::PingDecoder;
-pub use pong::PongDecoder;
-pub use r#pub::PubDecoder;
-pub use sub::SubDecoder;
-pub use unsub::UnsubDecoder;
 
 pub trait CommandDecoder<T, E> {
     fn decode_body(&self, buffer: &[u8]) -> CommandDecoderResult<T, E>;
@@ -129,11 +116,11 @@ pub(crate) fn slice_spliterator<'a>(
     })
 }
 
-pub(crate) fn char_spliterator<'a>(
-    bytes: &'a [u8],
+pub(crate) fn char_spliterator(
+    bytes: &[u8],
     needle: u8,
-) -> impl Iterator<Item = (&'a [u8], usize)> {
-    memchr::memchr_iter(needle, &bytes).scan(0usize, |acc, curr| {
+) -> impl Iterator<Item = (&'_ [u8], usize)> {
+    memchr::memchr_iter(needle, bytes).scan(0usize, |acc, curr| {
         // Slice from beginning to just before needle
         let slice = &bytes[*acc..curr];
         // Skip needle (length is known here)

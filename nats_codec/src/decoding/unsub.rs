@@ -1,8 +1,8 @@
 use super::{char_spliterator, slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
-pub struct UnsubDecoder;
+pub struct Decoder;
 
-impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for UnsubDecoder {
+impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder {
     fn decode_body(
         &self,
         buffer: &[u8],
@@ -50,7 +50,7 @@ impl std::convert::TryFrom<UnsubParts<'_>> for crate::Unsub {
             .map_err(|_| ClientDecodeError::BadUnsub)?;
 
         let max_msgs = decoded_msgs
-            .map(|m| m.parse())
+            .map(str::parse)
             .transpose()
             .map_err(|_| ClientDecodeError::BadUnsub)?;
 
