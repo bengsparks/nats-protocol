@@ -1,3 +1,5 @@
+use tokio_util::bytes::Bytes;
+
 use super::{char_spliterator, slice_spliterator, ClientDecodeError, CommandDecoderResult};
 
 pub struct PubDecoder;
@@ -71,24 +73,15 @@ impl std::convert::TryFrom<PubParts<'_>> for crate::Pub {
             return Err(ClientDecodeError::BadPub);
         };
 
-        let (bytes, payload) = match (value.bytes, value.payload) {
-            (0, b"") => (value.bytes, None),
-            (length, payload) if payload.len() == length => {
-                let Ok(p) = std::str::from_utf8(payload) else {
-                    return Err(ClientDecodeError::BadPub);
-                };
-                (value.bytes, Some(p))
-            }
-            _ => {
-                return Err(ClientDecodeError::BadPub);
-            }
-        };
+        if value.bytes != value.payload.len() {
+            return Err(ClientDecodeError::BadPub);
+        }
 
         Ok(Self {
             subject: subject.into(),
             reply_to: reply_to.map(Into::into),
-            bytes,
-            payload: payload.map(Into::into),
+            bytes: value.bytes,
+            payload: Bytes::copy_from_slice(value.payload),
         })
     }
 }

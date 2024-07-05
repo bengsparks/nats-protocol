@@ -76,14 +76,13 @@ fn decoding<T, E: CommonDecodeError, D: CommandDecoder<T, E> + ?Sized>(
         match decoder.decode_body(body) {
             CommandDecoderResult::Advance((frame, consume)) => {
                 src.advance(consume + prefix.len());
-                dbg!(&src);
                 return Ok(Some(frame));
             }
             CommandDecoderResult::FatalError(e) => return Err(e),
             CommandDecoderResult::FrameTooShort(Some(required)) => {
                 src.reserve(required);
                 return Ok(None);
-            },
+            }
             CommandDecoderResult::FrameTooShort(None) => return Ok(None),
             CommandDecoderResult::WrongDecoder => {
                 continue;

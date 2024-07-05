@@ -1,3 +1,5 @@
+use tokio_util::bytes::Bytes;
+
 use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct HMsgDecoder;
@@ -150,12 +152,10 @@ impl std::convert::TryFrom<HMsgParts<'_>> for crate::HMsg {
         };
 
         if value.total_bytes - value.header_bytes == 0
-            || value.payload.len() + 1 != value.total_bytes - value.header_bytes
+            || value.payload.len() != value.total_bytes - value.header_bytes
         {
             return Err(Self::Error::BadMsg);
         }
-        let payload = (value.total_bytes - value.header_bytes != 1)
-            .then(|| tokio_util::bytes::Bytes::copy_from_slice(value.payload));
 
         Ok(crate::HMsg {
             subject: subject.into(),
@@ -164,7 +164,7 @@ impl std::convert::TryFrom<HMsgParts<'_>> for crate::HMsg {
             header_bytes: value.header_bytes,
             total_bytes: value.total_bytes,
             headers: value.headers.map(Into::into),
-            payload: payload.map(Into::into),
+            payload: Bytes::copy_from_slice(value.payload),
         })
     }
 }

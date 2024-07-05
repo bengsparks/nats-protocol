@@ -50,15 +50,19 @@ fn publish(p: crate::Pub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), s
 
     let subject = p.subject;
     let bytes = p.bytes;
+    let payload = p.payload;
 
-    match (p.reply_to, p.payload) {
-        (Some(reply_to), Some(payload)) => write!(
-            writer,
-            "PUB {subject} {reply_to} {bytes}{CRLF}{payload}{CRLF}"
-        )?,
-        (Some(reply_to), None) => write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}{CRLF}")?,
-        (None, Some(payload)) => write!(writer, "PUB {subject} {bytes}{CRLF}{payload}{CRLF}")?,
-        (None, None) => write!(writer, "PUB {subject} {bytes}{CRLF}{CRLF}")?,
+    match p.reply_to {
+        Some(reply_to) => {
+            write!(writer, "PUB {subject} {reply_to} {bytes}{CRLF}")?;
+            writer.write_all(&payload)?;
+            write!(writer, "{CRLF}")?;
+        }
+        None => {
+            write!(writer, "PUB {subject} {bytes}{CRLF}")?;
+            writer.write_all(&payload)?;
+            write!(writer, "{CRLF}")?;
+        }
     }
 
     Ok(())

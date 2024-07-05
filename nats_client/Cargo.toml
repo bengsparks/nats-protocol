@@ -3,6 +3,21 @@ name = "nats_client"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "us-east-atlanta"
+
+[[example]]
+name = "us"
+
+[[example]]
+name = "publisher"
+
+#[[bin]]
+#name = "us"
+
+#[[bin]]
+#name = "pipe"
+
 [dependencies]
 log = { workspace = true }
 nats_codec = { workspace = true }
@@ -19,6 +34,9 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
-tokio-stream = { workspace = true, features = ["io-util"] } 
+tokio-stream = { features = ["io-util", "sync"], version = "0.1.15" } 
 tokio-util = { workspace = true, features = ["codec"] }
+
+[dev-dependencies]
+chrono = "0.4"
 

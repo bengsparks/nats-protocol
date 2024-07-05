@@ -6,6 +6,7 @@ mod decoding;
 mod encoder;
 
 pub use decoding::{ClientDecodeError, ServerDecodeError};
+use tokio_util::bytes::Bytes;
 
 pub(crate) const BUFSIZE_LIMIT: usize = u16::MAX as usize;
 
@@ -47,7 +48,7 @@ pub struct Msg {
     pub sid: String,
     pub reply_to: Option<String>,
     pub bytes: usize,
-    pub payload: Option<tokio_util::bytes::Bytes>,
+    pub payload: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -73,7 +74,7 @@ pub struct HMsg {
     pub header_bytes: usize,
     pub total_bytes: usize,
     pub headers: Option<HeaderMap>,
-    pub payload: Option<tokio_util::bytes::Bytes>,
+    pub payload: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,12 +88,13 @@ pub enum ServerCommand {
     Err(String),
 }
 
+#[derive(Debug)]
 pub struct Message {
     pub subject: String,
     pub sid: String,
     pub reply_to: Option<String>,
     pub headers: Option<HeaderMap>,
-    pub payload: Option<tokio_util::bytes::Bytes>,
+    pub payload: Bytes,
 }
 
 impl std::convert::From<HMsg> for Message {
@@ -147,7 +149,7 @@ pub struct Pub {
     pub subject: String,
     pub reply_to: Option<String>,
     pub bytes: usize,
-    pub payload: Option<String>,
+    pub payload: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -179,6 +181,7 @@ pub struct ClientCodec;
 #[cfg(test)]
 mod msg {
     use crate::ServerCodec;
+    use bytes::Bytes;
     use tokio_stream::StreamExt;
     use tokio_util::codec::FramedRead;
 
@@ -192,7 +195,7 @@ mod msg {
                 sid: "9".into(),
                 reply_to: None,
                 bytes: 11,
-                payload: Some("Hello World".into())
+                payload: Bytes::from_static(b"Hello World"),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -211,7 +214,7 @@ mod msg {
                 sid: "9".into(),
                 reply_to: Some("GREETING.34".into()),
                 bytes: 11,
-                payload: Some("Hello World".into())
+                payload: Bytes::from_static(b"Hello World"),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -222,6 +225,7 @@ mod msg {
 mod hmsg {
     use crate::ServerCodec;
     use tokio_stream::StreamExt;
+    use tokio_util::bytes::Bytes;
     use tokio_util::codec::FramedRead;
 
     #[tokio::test]
@@ -239,7 +243,7 @@ mod hmsg {
                 header_bytes: 34,
                 total_bytes: 45,
                 headers: Some("FoodGroup: vegetable".parse().unwrap()),
-                payload: Some("Hello World".into())
+                payload: Bytes::from_static(b"Hello World"),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -260,7 +264,7 @@ mod hmsg {
                 header_bytes: 34,
                 total_bytes: 45,
                 headers: Some("FoodGroup: vegetable".parse().unwrap()),
-                payload: Some("Hello World".into())
+                payload: Bytes::from_static(b"Hello World"),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -347,6 +351,7 @@ mod okerr {
 #[cfg(test)]
 mod publish {
     use crate::ClientCodec;
+    use bytes::Bytes;
     use tokio_stream::StreamExt;
     use tokio_util::codec::FramedRead;
 
@@ -359,7 +364,7 @@ mod publish {
                 subject: "FOO".into(),
                 reply_to: None,
                 bytes: 11,
-                payload: Some("Hello NATS!".into())
+                payload: Bytes::from_static(b"Hello NATS!")
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -377,7 +382,7 @@ mod publish {
                 subject: "FRONT.DOOR".into(),
                 reply_to: Some("JOKE.22".into()),
                 bytes: 11,
-                payload: Some("Knock Knock".into())
+                payload: Bytes::from_static(b"Knock Knock")
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);
@@ -392,7 +397,7 @@ mod publish {
                 subject: "NOTIFY".into(),
                 reply_to: None,
                 bytes: 0,
-                payload: None
+                payload: Bytes::from_static(b""),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);

@@ -1,3 +1,5 @@
+use tokio_util::bytes::Bytes;
+
 use super::{char_spliterator, slice_spliterator, CommandDecoderResult, ServerDecodeError};
 
 pub struct MsgDecoder;
@@ -88,19 +90,16 @@ impl std::convert::TryFrom<MsgParts<'_>> for crate::Msg {
             return Err(Self::Error::BadMsg);
         };
 
-        if value.payload.len() + 1 != bytes {
+        if value.payload.len() != bytes {
             return Err(Self::Error::BadMsg);
         }
-        let shorter = bytes.min(value.payload.len());
-        let payload =
-            (shorter != 0).then(|| tokio_util::bytes::Bytes::copy_from_slice(value.payload));
 
         Ok(crate::Msg {
             subject: subject.into(),
             sid: sid.into(),
             reply_to: reply_to.map(Into::into),
             bytes,
-            payload,
+            payload: Bytes::copy_from_slice(value.payload),
         })
     }
 }
