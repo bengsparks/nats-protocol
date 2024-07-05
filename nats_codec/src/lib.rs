@@ -155,14 +155,13 @@ pub struct Pub {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClientCommand {
-    Connect(Connect),
-    Pub(Pub),
-    HPub,
-    Sub(Sub),
-    Unsub(Unsub),
-    Ping,
-    Pong,
+pub struct HPub {
+    pub subject: String,
+    pub reply_to: Option<String>,
+    pub header_bytes: usize,
+    pub total_bytes: usize,
+    pub headers: HeaderMap,
+    pub payload: Bytes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -176,6 +175,17 @@ pub struct Sub {
 pub struct Unsub {
     pub sid: String,
     pub max_msgs: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClientCommand {
+    Connect(Connect),
+    Pub(Pub),
+    HPub(HPub),
+    Sub(Sub),
+    Unsub(Unsub),
+    Ping,
+    Pong,
 }
 
 pub struct ClientCodec;
@@ -227,7 +237,7 @@ mod msg {
 mod hmsg {
     use std::collections::HashMap;
 
-    use crate::ServerCodec;
+    use crate::{HeaderName, HeaderValue, ServerCodec};
     use tokio_stream::StreamExt;
     use tokio_util::bytes::Bytes;
     use tokio_util::codec::FramedRead;
@@ -246,7 +256,10 @@ mod hmsg {
                 reply_to: None,
                 header_bytes: 34,
                 total_bytes: 45,
-                headers: crate::HeaderMap(HashMap::new()),
+                headers: crate::HeaderMap(HashMap::from_iter([(
+                    HeaderName("FoodGroup".into()),
+                    vec![HeaderValue("vegetable".into())]
+                )])),
                 payload: Bytes::from_static(b"Hello World"),
             }))
         );
@@ -267,7 +280,10 @@ mod hmsg {
                 reply_to: Some("BAZ.69".into()),
                 header_bytes: 34,
                 total_bytes: 45,
-                headers: crate::HeaderMap(HashMap::new()),
+                headers: crate::HeaderMap(HashMap::from_iter([(
+                    HeaderName("FoodGroup".into()),
+                    vec![HeaderValue("vegetable".into())]
+                )])),
                 payload: Bytes::from_static(b"Hello World"),
             }))
         );
@@ -463,6 +479,114 @@ mod subscribe {
             Some(crate::ClientCommand::Unsub(crate::Unsub {
                 sid: "1".into(),
                 max_msgs: Some(5),
+            }))
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod hpub {
+    use std::collections::HashMap;
+
+    use crate::{ClientCodec, HeaderName, HeaderValue};
+    use tokio_stream::StreamExt;
+    use tokio_util::bytes::Bytes;
+    use tokio_util::codec::FramedRead;
+
+    #[tokio::test]
+    async fn simple() {
+        let mut reader = FramedRead::new(
+            &b"HPUB FOO 22 33\r\nNATS/1.0\r\nBar: Baz\r\n\r\nHello NATS!\r\n"[..],
+            ClientCodec,
+        );
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::HPub(crate::HPub {
+                subject: "FOO".into(),
+                reply_to: None,
+                header_bytes: 22,
+                total_bytes: 33,
+                headers: crate::HeaderMap(HashMap::from_iter([(
+                    HeaderName("Bar".into()),
+                    vec![HeaderValue("Baz".into())]
+                )])),
+                payload: Bytes::from_static(b"Hello NATS!"),
+            }))
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn reply_to() {
+        let mut reader = FramedRead::new(
+            &b"HPUB FRONT.DOOR JOKE.22 45 56\r\nNATS/1.0\r\nBREAKFAST: donut\r\nLUNCH: burger\r\n\r\nKnock Knock\r\n"[..],
+            ClientCodec,
+        );
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::HPub(crate::HPub {
+                subject: "FRONT.DOOR".into(),
+                reply_to: Some("JOKE.22".into()),
+                header_bytes: 45,
+                total_bytes: 56,
+                headers: crate::HeaderMap(HashMap::from_iter([
+                    (
+                        HeaderName("BREAKFAST".into()),
+                        vec![HeaderValue("donut".into())]
+                    ),
+                    (
+                        HeaderName("LUNCH".into()),
+                        vec![HeaderValue("burger".into())]
+                    )
+                ])),
+                payload: Bytes::from_static(b"Knock Knock"),
+            }))
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn empty_msg() {
+        let mut reader = FramedRead::new(
+            &b"HPUB NOTIFY 22 22\r\nNATS/1.0\r\nBar: Baz\r\n\r\n\r\n"[..],
+            ClientCodec,
+        );
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::HPub(crate::HPub {
+                subject: "NOTIFY".into(),
+                reply_to: None,
+                header_bytes: 22,
+                total_bytes: 22,
+                headers: crate::HeaderMap(HashMap::from_iter([(
+                    HeaderName("Bar".into()),
+                    vec![HeaderValue("Baz".into())]
+                ),])),
+                payload: Bytes::from_static(b""),
+            }))
+        );
+        assert_eq!(reader.try_next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn double_header() {
+        let mut reader = FramedRead::new(
+            &b"HPUB MORNING.MENU 47 51\r\nNATS/1.0\r\nBREAKFAST: donut\r\nBREAKFAST: eggs\r\n\r\nYum!\r\n"[..],
+            ClientCodec,
+        );
+        assert_eq!(
+            reader.try_next().await.unwrap(),
+            Some(crate::ClientCommand::HPub(crate::HPub {
+                subject: "MORNING.MENU".into(),
+                reply_to: None,
+                header_bytes: 47,
+                total_bytes: 51,
+                headers: crate::HeaderMap(HashMap::from_iter([(
+                    HeaderName("BREAKFAST".into()),
+                    vec![HeaderValue("donut".into()), HeaderValue("eggs".into())]
+                ),])),
+                payload: Bytes::from_static(b"Yum!"),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);

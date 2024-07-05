@@ -299,7 +299,7 @@ impl ConnectionHandle {
             echo: None,
             jwt: None,
             no_responders: None,
-            headers: None,
+            headers: Some(true),
         }))
         .await
         .expect("Failed to send `CONNECT`");

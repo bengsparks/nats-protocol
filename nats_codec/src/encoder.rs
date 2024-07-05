@@ -19,7 +19,7 @@ impl tokio_util::codec::Encoder<crate::ClientCommand> for crate::ClientCodec {
         match item {
             crate::ClientCommand::Connect(c) => connect(c, dst)?,
             crate::ClientCommand::Pub(p) => publish(p, dst)?,
-            crate::ClientCommand::HPub => todo!(),
+            crate::ClientCommand::HPub(hpub) => todo!(),
             crate::ClientCommand::Sub(s) => subscribe(s, dst)?,
             crate::ClientCommand::Unsub(us) => unsubscribe(us, dst)?,
             crate::ClientCommand::Ping => ping(dst)?,
