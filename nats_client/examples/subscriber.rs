@@ -1,5 +1,6 @@
-use clap::Parser;
 use std::net::SocketAddr;
+
+use clap::Parser;
 use tokio_stream::StreamExt;
 
 use nats_client::{ConnectionHandle, SubscriptionOptions};
@@ -7,25 +8,26 @@ use nats_client::{ConnectionHandle, SubscriptionOptions};
 #[derive(Parser)]
 struct Cli {
     socket: SocketAddr,
+    subject: String,
     max_msgs: Option<usize>,
 }
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let Cli { socket, max_msgs } = Cli::parse();
+    let Cli {
+        socket,
+        subject,
+        max_msgs,
+    } = Cli::parse();
 
     let mut connection = ConnectionHandle::connect(socket).await;
 
-    let mut atlanta = connection
-        .subscribe_with_options(
-            "time.us.*".into(),
-            SubscriptionOptions {
-                max_msgs,
-                ..Default::default()
-            },
-        )
-        .await;
+    let options = SubscriptionOptions {
+        max_msgs,
+        ..Default::default()
+    };
+    let mut atlanta = connection.subscribe_with_options(subject, options).await;
 
     let sid = atlanta.sid().clone();
     while let Some(message) = atlanta.next().await {

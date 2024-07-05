@@ -1,4 +1,5 @@
 mod connection;
+mod subscriber;
 
 pub use connection::{ConnectionCommand, ConnectionHandle};
-pub use connection::{Subscriber, SubscriptionOptions};
+pub use subscriber::{Subscriber, SubscriptionOptions};

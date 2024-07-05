@@ -1,34 +1,25 @@
-mod ping;
-mod read;
-mod subscriber;
-mod write;
-
 use futures::{SinkExt as _, StreamExt, TryStreamExt};
 use nats_codec::{
     ClientCodec, ClientCommand, Connect, Message, Pub, ServerCodec, ServerCommand, Sub, Unsub,
 };
 
-use tokio::{
-    io::{BufReader, BufWriter},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream,
-    },
-    sync::{mpsc, oneshot, Mutex},
+use tokio::io::{BufReader, BufWriter};
+use tokio::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream,
 };
+use tokio::sync::{mpsc, oneshot, Mutex};
+
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
+use std::{collections::HashMap, net::SocketAddr};
 
-pub use subscriber::{Subscriber, SubscriptionOptions};
+pub use crate::{Subscriber, SubscriptionOptions};
 
 #[derive(Debug)]
 pub struct SubscriptionRequest {
@@ -100,9 +91,9 @@ impl Connection {
 
         Self {
             state: State {
-                read: read.into(),
-                write: write.into(),
-                conn: conn.into(),
+                read,
+                write,
+                conn,
                 sid: AtomicUsize::new(0),
                 sid2channel: Mutex::new(HashMap::new()).into(),
             },
@@ -203,7 +194,7 @@ impl Connection {
             while let Some(message) = read_queue.recv().await {
                 match message {
                     ConnectionCommand::Publish(publish) => {
-                        send_queue.send(ClientCommand::Pub(publish)).await;
+                        send_queue.send(ClientCommand::Pub(publish)).await.unwrap();
                     }
                     ConnectionCommand::Subscribe(SubscriptionRequest {
                         subject,
@@ -224,7 +215,8 @@ impl Connection {
                                 queue_group: options.queue_group.clone(),
                                 sid: sid.clone(),
                             }))
-                            .await;
+                            .await
+                            .unwrap();
 
                         let mut receiver = ReceiverStream::new(recv).boxed();
                         if let Some(max_msgs) = options.max_msgs {
@@ -240,7 +232,7 @@ impl Connection {
                         }
 
                         let subscriber = Subscriber::new(sid, receiver, self.conn_sender.clone());
-                        sub_chan.send(subscriber);
+                        sub_chan.send(subscriber).unwrap();
                     }
                     ConnectionCommand::Unsubscribe(unsubscibe) => {
                         let mut sid2channel = s2c.lock().await;
@@ -346,8 +338,7 @@ impl ConnectionHandle {
             .await
             .unwrap();
 
-        let subscriber = receiver.await.unwrap();
-        subscriber
+        receiver.await.unwrap()
     }
 
     pub async fn publish(&mut self, subject: String, payload: tokio_util::bytes::Bytes) {

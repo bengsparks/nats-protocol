@@ -4,19 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [[example]]
-name = "us-east-atlanta"
-
-[[example]]
-name = "us"
+name = "subscriber"
 
 [[example]]
 name = "publisher"
-
-#[[bin]]
-#name = "us"
-
-#[[bin]]
-#name = "pipe"
 
 [dependencies]
 log = { workspace = true }

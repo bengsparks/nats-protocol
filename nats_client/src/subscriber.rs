@@ -10,14 +10,14 @@ pub struct Subscriber {
     sid: String,
     messages: BoxStream<'static, Message>,
 
-    connection_chan: mpsc::Sender<ConnectionCommand>,
+    conn_chan: mpsc::Sender<ConnectionCommand>,
 }
 
 impl std::fmt::Debug for Subscriber {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Subscriber")
             .field("sid", &self.sid)
-            .field("connection_chan", &self.connection_chan)
+            .field("conn_chan", &self.conn_chan)
             .finish()
     }
 }
@@ -26,11 +26,11 @@ impl Subscriber {
     pub fn new(
         sid: String,
         messages: BoxStream<'static, Message>,
-        connection_chan: mpsc::Sender<ConnectionCommand>,
+        conn_chan: mpsc::Sender<ConnectionCommand>,
     ) -> Self {
         Self {
             sid,
-            connection_chan,
+            conn_chan,
             messages,
         }
     }
@@ -40,35 +40,25 @@ impl Subscriber {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct SubscriptionOptions {
     pub max_msgs: Option<usize>,
     pub queue_group: Option<String>,
 }
 
-impl std::default::Default for SubscriptionOptions {
-    fn default() -> Self {
-        Self {
-            max_msgs: Default::default(),
-            queue_group: Default::default(),
-        }
-    }
-}
-
 impl Drop for Subscriber {
     fn drop(&mut self) {
-        let sender = self.connection_chan.clone();
+        let sender = self.conn_chan.clone();
         let sid = self.sid.clone();
 
         tokio::spawn({
             async move {
-                sender
+                let _ = sender
                     .send(ConnectionCommand::Unsubscribe(Unsub {
                         sid: sid.to_string(),
                         max_msgs: None,
                     }))
-                    .await
-                    .unwrap()
+                    .await;
             }
         });
     }
