@@ -83,9 +83,6 @@ fn decoding<T, E: CommonDecodeError, D: CommandDecoder<T, E> + ?Sized>(
                 return Ok(None);
             }
             CommandDecoderResult::FrameTooShort(None) => return Ok(None),
-            CommandDecoderResult::WrongDecoder => {
-                continue;
-            }
         }
     }
 

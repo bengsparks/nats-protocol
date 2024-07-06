@@ -96,10 +96,6 @@ pub enum CommandDecoderResult<T, E> {
     /// Nonfatal error: Buffer is shorter than full frame
     /// Decoder should read more buffer into memory and retry.
     FrameTooShort(Option<usize>),
-
-    /// Nonfatal error: the prefix could not be detected
-    /// Decoder should try a different command.
-    WrongDecoder,
 }
 
 pub(crate) fn slice_spliterator<'a>(
