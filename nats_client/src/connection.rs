@@ -64,14 +64,14 @@ struct State {
     sid2channel: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
 }
 
-struct Connection {
+struct ConnectionActor {
     state: State,
 
     pub conn_sender: mpsc::Sender<ConnectionCommand>,
     pub client_sender: mpsc::Sender<ClientCommand>,
 }
 
-impl Connection {
+impl ConnectionActor {
     pub fn new(reader: OwnedReadHalf, writer: OwnedWriteHalf) -> Self {
         let (conn_sender, conn_receiver) = mpsc::channel(1024);
         let (client_sender, client_receiver) = mpsc::channel(1024);
@@ -256,14 +256,14 @@ impl Connection {
     }
 }
 
-pub struct ConnectionHandle {
+pub struct Connection {
     pub conn_chan: mpsc::Sender<ConnectionCommand>,
     pub client_chan: mpsc::Sender<ClientCommand>,
 
     pub task: tokio::task::JoinHandle<()>,
 }
 
-impl ConnectionHandle {
+impl Connection {
     pub async fn connect(socket: SocketAddr) -> Self {
         log::trace!("Connecting to {}", socket);
         let (read, write) = TcpStream::connect(socket)
@@ -304,7 +304,7 @@ impl ConnectionHandle {
         .await
         .expect("Failed to send `CONNECT`");
 
-        let actor = Connection::new(reader.into_inner(), writer.into_inner());
+        let actor = ConnectionActor::new(reader.into_inner(), writer.into_inner());
 
         let client_sender = actor.client_sender.clone();
         let conn_sender = actor.conn_sender.clone();
