@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use clap::Parser;
 use tokio_stream::StreamExt;
 
-use nats_client::{ConnectionHandle, SubscriptionOptions};
+use nats_client::{Connection, SubscriptionOptions};
 
 #[derive(Parser)]
 struct Cli {
@@ -21,7 +21,7 @@ async fn main() {
         max_msgs,
     } = Cli::parse();
 
-    let mut connection = ConnectionHandle::connect(socket).await;
+    let mut connection = Connection::connect(socket).await;
 
     let options = SubscriptionOptions {
         max_msgs,
