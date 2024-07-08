@@ -8,7 +8,7 @@ use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpStream,
 };
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
@@ -61,7 +61,7 @@ struct State {
     conn: ConnectionState,
 
     sid: AtomicUsize,
-    sid2channel: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
+    sid2chan: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
 }
 
 struct ConnectionActor {
@@ -95,7 +95,7 @@ impl ConnectionActor {
                 write,
                 conn,
                 sid: AtomicUsize::new(0),
-                sid2channel: Mutex::new(HashMap::new()).into(),
+                sid2chan: RwLock::new(HashMap::new()).into(),
             },
             conn_sender,
             client_sender,
@@ -104,7 +104,7 @@ impl ConnectionActor {
 
     pub async fn run(self) {
         // Read from the TCP stream
-        let s2c = self.state.sid2channel.clone();
+        let sid2chan = self.state.sid2chan.clone();
 
         let reader = tokio::spawn(async move {
             let ReadState { reader, channel } = self.state.read;
@@ -116,28 +116,26 @@ impl ConnectionActor {
                         log::trace!("Server sent `INFO` command after initial connection {info:?}");
                     }
                     ServerCommand::Msg(msg) => {
-                        log::info!("Server sent {msg:?}");
-                        let sid2channel = s2c.lock().await;
+                        log::info!("Server sent message: {msg:?}");
+                        let sid2channel = sid2chan.read().await;
 
-                        let Some(sid) = sid2channel.get(&msg.sid.to_string()) else {
+                        let Some(chan) = sid2channel.get(&msg.sid.to_string()) else {
                             log::error!("MSG contained unknown SID: {}", msg.sid);
                             continue;
                         };
-
-                        sid.send(msg.into())
+                        chan.send(msg.into())
                             .await
                             .expect("Failed to send MSG to subscriber");
                     }
                     ServerCommand::HMsg(hmsg) => {
-                        log::info!("Server sent {hmsg:?}");
-                        let sid2channel = s2c.lock().await;
+                        log::info!("Server sent message with headers: {hmsg:?}");
+                        let sid2chan = sid2chan.read().await;
 
-                        let Some(sid) = sid2channel.get(&hmsg.sid.to_string()) else {
+                        let Some(chan) = sid2chan.get(&hmsg.sid.to_string()) else {
                             log::error!("MSG contained unknown SID: {}", hmsg.sid);
                             continue;
                         };
-
-                        sid.send(hmsg.into())
+                        chan.send(hmsg.into())
                             .await
                             .expect("Failed to send HMSG to subscriber");
                     }
@@ -159,13 +157,12 @@ impl ConnectionActor {
 
         // Write to TCP stream
         let writer = tokio::spawn(async move {
-            let WriteState {
-                writer,
-                mut channel,
-            } = self.state.write;
+            let WriteState { writer, channel } = self.state.write;
 
+            let mut stream = ReceiverStream::new(channel);
             let mut sink = FramedWrite::new(writer, ClientCodec);
-            while let Some(command) = channel.recv().await {
+
+            while let Some(command) = stream.next().await {
                 sink.send(command).await.unwrap();
             }
         });
@@ -184,7 +181,7 @@ impl ConnectionActor {
             }
         });
 
-        let s2c = self.state.sid2channel.clone();
+        let sid2chan = self.state.sid2chan.clone();
         let negotiator = tokio::spawn(async move {
             let ConnectionState {
                 mut read_queue,
@@ -203,11 +200,24 @@ impl ConnectionActor {
                         sub_chan,
                     }) => {
                         let sid = {
-                            let mut sid2channel = s2c.lock().await;
+                            let mut sid2chan = sid2chan.write().await;
                             let sid = self.state.sid.fetch_add(1, Ordering::Relaxed).to_string();
-                            sid2channel.insert(sid.clone(), send);
+                            sid2chan.insert(sid.clone(), send);
                             sid
                         };
+
+                        let receiver = if let Some(max_msgs) = options.max_msgs {
+                            ReceiverStream::new(recv).take(max_msgs).boxed()
+                        } else {
+                            ReceiverStream::new(recv).boxed()
+                        };
+
+                        // Send the subscriber back to the client thread ASAP so they can continue work.
+                        // It does not matter that the `SUB` (and potential `UNSUB`) have not yet been sent yet,
+                        // as the `.take` combinator on the `ReceiverStream` will keep count of received messages by itself,
+                        let subscriber =
+                            Subscriber::new(sid.clone(), receiver, self.conn_sender.clone());
+                        sub_chan.send(subscriber).unwrap();
 
                         send_queue
                             .send(ClientCommand::Sub(Sub {
@@ -218,7 +228,6 @@ impl ConnectionActor {
                             .await
                             .unwrap();
 
-                        let mut receiver = ReceiverStream::new(recv).boxed();
                         if let Some(max_msgs) = options.max_msgs {
                             send_queue
                                 .send(ClientCommand::Unsub(Unsub {
@@ -227,16 +236,11 @@ impl ConnectionActor {
                                 }))
                                 .await
                                 .unwrap();
-
-                            receiver = receiver.take(max_msgs).boxed()
                         }
-
-                        let subscriber = Subscriber::new(sid, receiver, self.conn_sender.clone());
-                        sub_chan.send(subscriber).unwrap();
                     }
                     ConnectionCommand::Unsubscribe(unsubscibe) => {
-                        let mut sid2channel = s2c.lock().await;
-                        sid2channel.remove(&unsubscibe.sid);
+                        let mut sid2chan = sid2chan.write().await;
+                        sid2chan.remove(&unsubscibe.sid);
                         send_queue
                             .send(ClientCommand::Unsub(unsubscibe))
                             .await
