@@ -79,7 +79,7 @@ impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder 
         };
 
         CommandDecoderResult::Advance((
-            crate::ClientCommand::HPub(hpub),
+            crate::ClientCommand::HPublish(hpub),
             metadata_len + total_bytes + 2,
         ))
     }
@@ -94,7 +94,7 @@ struct HPubParts<'a> {
     payload: &'a [u8],
 }
 
-impl std::convert::TryFrom<HPubParts<'_>> for crate::HPub {
+impl std::convert::TryFrom<HPubParts<'_>> for crate::HPublish {
     type Error = ClientDecodeError;
 
     fn try_from(value: HPubParts<'_>) -> Result<Self, Self::Error> {
@@ -116,7 +116,7 @@ impl std::convert::TryFrom<HPubParts<'_>> for crate::HPub {
             return Err(Self::Error::BadHPub);
         };
 
-        Ok(crate::HPub {
+        Ok(crate::HPublish {
             subject: subject.into(),
             reply_to: reply_to.map(Into::into),
             header_bytes: value.header_bytes,

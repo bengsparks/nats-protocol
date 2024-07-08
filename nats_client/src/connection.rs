@@ -1,6 +1,7 @@
 use futures::{SinkExt as _, StreamExt, TryStreamExt};
 use nats_codec::{
-    ClientCodec, ClientCommand, Connect, Message, Pub, ServerCodec, ServerCommand, Sub, Unsub,
+    ClientCodec, ClientCommand, Connect, Message, Publish, ServerCodec, ServerCommand, Subscribe,
+    Unsubscribe,
 };
 
 use tokio::io::{BufReader, BufWriter};
@@ -31,9 +32,9 @@ pub struct SubscriptionRequest {
 
 #[derive(Debug)]
 pub enum ConnectionCommand {
-    Publish(nats_codec::Pub),
+    Publish(nats_codec::Publish),
     Subscribe(SubscriptionRequest),
-    Unsubscribe(nats_codec::Unsub),
+    Unsubscribe(nats_codec::Unsubscribe),
     Ping,
     Pong,
 }
@@ -191,7 +192,10 @@ impl ConnectionActor {
             while let Some(message) = read_queue.recv().await {
                 match message {
                     ConnectionCommand::Publish(publish) => {
-                        send_queue.send(ClientCommand::Pub(publish)).await.unwrap();
+                        send_queue
+                            .send(ClientCommand::Publish(publish))
+                            .await
+                            .unwrap();
                     }
                     ConnectionCommand::Subscribe(SubscriptionRequest {
                         subject,
@@ -220,7 +224,7 @@ impl ConnectionActor {
                         sub_chan.send(subscriber).unwrap();
 
                         send_queue
-                            .send(ClientCommand::Sub(Sub {
+                            .send(ClientCommand::Subscribe(Subscribe {
                                 subject,
                                 queue_group: options.queue_group.clone(),
                                 sid: sid.clone(),
@@ -230,7 +234,7 @@ impl ConnectionActor {
 
                         if let Some(max_msgs) = options.max_msgs {
                             send_queue
-                                .send(ClientCommand::Unsub(Unsub {
+                                .send(ClientCommand::Unsubscribe(Unsubscribe {
                                     max_msgs: Some(max_msgs),
                                     sid: sid.clone(),
                                 }))
@@ -242,7 +246,7 @@ impl ConnectionActor {
                         let mut sid2chan = sid2chan.write().await;
                         sid2chan.remove(&unsubscibe.sid);
                         send_queue
-                            .send(ClientCommand::Unsub(unsubscibe))
+                            .send(ClientCommand::Unsubscribe(unsubscibe))
                             .await
                             .unwrap();
                     }
@@ -347,7 +351,7 @@ impl Connection {
 
     pub async fn publish(&mut self, subject: String, payload: tokio_util::bytes::Bytes) {
         self.conn_chan
-            .send(ConnectionCommand::Publish(Pub {
+            .send(ConnectionCommand::Publish(Publish {
                 subject,
                 reply_to: None,
                 bytes: payload.len(),

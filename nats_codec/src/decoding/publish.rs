@@ -50,7 +50,7 @@ impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder 
             }
         };
 
-        CommandDecoderResult::Advance((crate::ClientCommand::Pub(pb), end))
+        CommandDecoderResult::Advance((crate::ClientCommand::Publish(pb), end))
     }
 }
 
@@ -61,7 +61,7 @@ struct PubParts<'a> {
     pub payload: &'a [u8],
 }
 
-impl std::convert::TryFrom<PubParts<'_>> for crate::Pub {
+impl std::convert::TryFrom<PubParts<'_>> for crate::Publish {
     type Error = ClientDecodeError;
 
     fn try_from(value: PubParts<'_>) -> Result<Self, Self::Error> {

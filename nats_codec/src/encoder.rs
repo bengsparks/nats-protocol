@@ -18,10 +18,10 @@ impl tokio_util::codec::Encoder<crate::ClientCommand> for crate::ClientCodec {
     ) -> Result<(), Self::Error> {
         match item {
             crate::ClientCommand::Connect(c) => connect(c, dst)?,
-            crate::ClientCommand::Pub(p) => publish(p, dst)?,
-            crate::ClientCommand::HPub(hpub) => todo!(),
-            crate::ClientCommand::Sub(s) => subscribe(s, dst)?,
-            crate::ClientCommand::Unsub(us) => unsubscribe(us, dst)?,
+            crate::ClientCommand::Publish(p) => publish(p, dst)?,
+            crate::ClientCommand::HPublish(h) => hpublish(h, dst)?,
+            crate::ClientCommand::Subscribe(s) => subscribe(s, dst)?,
+            crate::ClientCommand::Unsubscribe(u) => unsubscribe(u, dst)?,
             crate::ClientCommand::Ping => ping(dst)?,
             crate::ClientCommand::Pong => pong(dst)?,
         }
@@ -45,7 +45,7 @@ fn connect(
     Ok(())
 }
 
-fn publish(p: crate::Pub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
+fn publish(p: crate::Publish, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
 
     let subject = p.subject;
@@ -65,7 +65,43 @@ fn publish(p: crate::Pub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), s
     Ok(())
 }
 
-fn subscribe(s: crate::Sub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), std::io::Error> {
+fn hpublish(
+    p: crate::HPublish,
+    dst: &mut tokio_util::bytes::BytesMut,
+) -> Result<(), std::io::Error> {
+    let mut writer = dst.writer();
+
+    let subject = p.subject;
+    write!(writer, "HPUB {subject} ")?;
+
+    if let Some(reply_to) = p.reply_to {
+        write!(writer, "{reply_to} ")?;
+    }
+
+    let header_bytes = p.header_bytes;
+    let total_bytes = p.total_bytes;
+
+    write!(writer, "{header_bytes} {total_bytes}{CRLF}")?;
+
+    write!(writer, "NATS/1.0{CRLF}")?;
+    for (key, values) in p.headers.0.into_iter() {
+        for value in values {
+            write!(writer, "{}: {}{CRLF}", key.0, value.0)?;
+        }
+    }
+    write!(writer, "{CRLF}")?;
+
+    let payload = p.payload;
+    writer.write_all(&payload)?;
+    write!(writer, "{CRLF}")?;
+
+    Ok(())
+}
+
+fn subscribe(
+    s: crate::Subscribe,
+    dst: &mut tokio_util::bytes::BytesMut,
+) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();
 
     let subject = s.subject;
@@ -80,7 +116,7 @@ fn subscribe(s: crate::Sub, dst: &mut tokio_util::bytes::BytesMut) -> Result<(),
 }
 
 fn unsubscribe(
-    u: crate::Unsub,
+    u: crate::Unsubscribe,
     dst: &mut tokio_util::bytes::BytesMut,
 ) -> Result<(), std::io::Error> {
     let mut writer = dst.writer();

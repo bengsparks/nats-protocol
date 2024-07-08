@@ -35,7 +35,7 @@ impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder 
             Err(e) => return CommandDecoderResult::FatalError(e),
         };
 
-        CommandDecoderResult::Advance((crate::ClientCommand::Sub(sub), end))
+        CommandDecoderResult::Advance((crate::ClientCommand::Subscribe(sub), end))
     }
 }
 
@@ -45,7 +45,7 @@ struct SubParts<'a> {
     sid: &'a [u8],
 }
 
-impl std::convert::TryFrom<SubParts<'_>> for crate::Sub {
+impl std::convert::TryFrom<SubParts<'_>> for crate::Subscribe {
     type Error = ClientDecodeError;
 
     fn try_from(value: SubParts<'_>) -> Result<Self, Self::Error> {

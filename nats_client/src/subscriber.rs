@@ -1,7 +1,7 @@
 use std::task::Poll;
 
 use futures::{stream::BoxStream, StreamExt as _};
-use nats_codec::{Message, Unsub};
+use nats_codec::{Message, Unsubscribe};
 use tokio::sync::mpsc;
 
 use crate::ConnectionCommand;
@@ -54,7 +54,7 @@ impl Drop for Subscriber {
         tokio::spawn({
             async move {
                 let _ = sender
-                    .send(ConnectionCommand::Unsubscribe(Unsub {
+                    .send(ConnectionCommand::Unsubscribe(Unsubscribe {
                         sid: sid.to_string(),
                         max_msgs: None,
                     }))

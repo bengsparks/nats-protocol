@@ -28,7 +28,7 @@ impl super::CommandDecoder<crate::ClientCommand, ClientDecodeError> for Decoder 
             }
         };
 
-        CommandDecoderResult::Advance((crate::ClientCommand::Unsub(unsub), end))
+        CommandDecoderResult::Advance((crate::ClientCommand::Unsubscribe(unsub), end))
     }
 }
 
@@ -37,7 +37,7 @@ struct UnsubParts<'a> {
     max_msgs: Option<&'a [u8]>,
 }
 
-impl std::convert::TryFrom<UnsubParts<'_>> for crate::Unsub {
+impl std::convert::TryFrom<UnsubParts<'_>> for crate::Unsubscribe {
     type Error = ClientDecodeError;
 
     fn try_from(value: UnsubParts<'_>) -> Result<Self, Self::Error> {

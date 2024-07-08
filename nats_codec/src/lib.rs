@@ -147,7 +147,7 @@ pub struct Connect {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Pub {
+pub struct Publish {
     pub subject: String,
     pub reply_to: Option<String>,
     pub bytes: usize,
@@ -155,7 +155,7 @@ pub struct Pub {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HPub {
+pub struct HPublish {
     pub subject: String,
     pub reply_to: Option<String>,
     pub header_bytes: usize,
@@ -165,14 +165,14 @@ pub struct HPub {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sub {
+pub struct Subscribe {
     pub subject: String,
     pub queue_group: Option<String>,
     pub sid: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Unsub {
+pub struct Unsubscribe {
     pub sid: String,
     pub max_msgs: Option<usize>,
 }
@@ -180,10 +180,10 @@ pub struct Unsub {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientCommand {
     Connect(Connect),
-    Pub(Pub),
-    HPub(HPub),
-    Sub(Sub),
-    Unsub(Unsub),
+    Publish(Publish),
+    HPublish(HPublish),
+    Subscribe(Subscribe),
+    Unsubscribe(Unsubscribe),
     Ping,
     Pong,
 }
@@ -380,7 +380,7 @@ mod publish {
         let mut reader = FramedRead::new(&b"PUB FOO 11\r\nHello NATS!\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Pub(crate::Pub {
+            Some(crate::ClientCommand::Publish(crate::Publish {
                 subject: "FOO".into(),
                 reply_to: None,
                 bytes: 11,
@@ -398,7 +398,7 @@ mod publish {
         );
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Pub(crate::Pub {
+            Some(crate::ClientCommand::Publish(crate::Publish {
                 subject: "FRONT.DOOR".into(),
                 reply_to: Some("JOKE.22".into()),
                 bytes: 11,
@@ -413,7 +413,7 @@ mod publish {
         let mut reader = FramedRead::new(&b"PUB NOTIFY 0\r\n\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Pub(crate::Pub {
+            Some(crate::ClientCommand::Publish(crate::Publish {
                 subject: "NOTIFY".into(),
                 reply_to: None,
                 bytes: 0,
@@ -435,7 +435,7 @@ mod subscribe {
         let mut reader = FramedRead::new(&b"SUB FOO 1\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Sub(crate::Sub {
+            Some(crate::ClientCommand::Subscribe(crate::Subscribe {
                 subject: "FOO".into(),
                 queue_group: None,
                 sid: "1".into(),
@@ -449,7 +449,7 @@ mod subscribe {
         let mut reader = FramedRead::new(&b"SUB BAR G1 44\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Sub(crate::Sub {
+            Some(crate::ClientCommand::Subscribe(crate::Subscribe {
                 subject: "BAR".into(),
                 queue_group: Some("G1".into()),
                 sid: "44".into(),
@@ -463,7 +463,7 @@ mod subscribe {
         let mut reader = FramedRead::new(&b"UNSUB 1\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Unsub(crate::Unsub {
+            Some(crate::ClientCommand::Unsubscribe(crate::Unsubscribe {
                 sid: "1".into(),
                 max_msgs: None,
             }))
@@ -476,7 +476,7 @@ mod subscribe {
         let mut reader = FramedRead::new(&b"UNSUB 1 5\r\n"[..], ClientCodec);
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::Unsub(crate::Unsub {
+            Some(crate::ClientCommand::Unsubscribe(crate::Unsubscribe {
                 sid: "1".into(),
                 max_msgs: Some(5),
             }))
@@ -502,7 +502,7 @@ mod hpub {
         );
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::HPub(crate::HPub {
+            Some(crate::ClientCommand::HPublish(crate::HPublish {
                 subject: "FOO".into(),
                 reply_to: None,
                 header_bytes: 22,
@@ -525,7 +525,7 @@ mod hpub {
         );
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::HPub(crate::HPub {
+            Some(crate::ClientCommand::HPublish(crate::HPublish {
                 subject: "FRONT.DOOR".into(),
                 reply_to: Some("JOKE.22".into()),
                 header_bytes: 45,
@@ -554,7 +554,7 @@ mod hpub {
         );
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::HPub(crate::HPub {
+            Some(crate::ClientCommand::HPublish(crate::HPublish {
                 subject: "NOTIFY".into(),
                 reply_to: None,
                 header_bytes: 22,
@@ -577,7 +577,7 @@ mod hpub {
         );
         assert_eq!(
             reader.try_next().await.unwrap(),
-            Some(crate::ClientCommand::HPub(crate::HPub {
+            Some(crate::ClientCommand::HPublish(crate::HPublish {
                 subject: "MORNING.MENU".into(),
                 reply_to: None,
                 header_bytes: 47,
