@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["nats_client", "nats_codec", "nats_server"]
+members = ["nats_client", "nats_sans_io", "nats_codec", "nats_server"]
 
 [workspace.dependencies]
 tokio = { version = "1.38.0", default-features = false }
