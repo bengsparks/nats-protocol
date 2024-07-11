@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    process::Command,
     time::{Duration, Instant},
 };
 
@@ -177,7 +176,7 @@ impl NatsBinding {
 
     /// Returns the timestamp when we next expect [Self::handle_send_ping_timeout] to be called.
     /// i.e. When should the next `PING` be sent.
-    pub fn poll_send_ping_timeout(&self) -> Option<Instant> {
+    pub fn poll_send_ping_timeout(&self, now: Instant) -> Option<Instant> {
         let State {
             keep_alive,
             timeouts,
@@ -188,14 +187,17 @@ impl NatsBinding {
             return None;
         };
 
-        keep_alive
-            .last_ping_sent_at
-            .map(|i| i + timeouts.ping_interval)
+        match keep_alive.last_ping_sent_at {
+            // Ping has been previously sent
+            Some(sent_at) => Some(sent_at + timeouts.ping_interval),
+            // Ping has never been sent; now is the time!
+            None => Some(now),
+        }
     }
 
     /// What happens when [Self::poll_recv_ping_timeout]'s timestamp is exceeded.
     #[logcall(err = "error")]
-    pub fn handle_recv_ping_timeout(&mut self, now: Instant) -> Result<(), ConnState> {
+    pub fn handle_send_pong_timeout(&mut self, now: Instant) -> Result<(), ConnState> {
         let State {
             keep_alive,
             timeouts,
@@ -207,7 +209,9 @@ impl NatsBinding {
         };
 
         let command = match keep_alive.last_ping_received_at {
-            Some(received_at) if now.duration_since(received_at) >= timeouts.pong_delay => Some(ClientCommand::Pong),
+            Some(received_at) if now.duration_since(received_at) >= timeouts.pong_delay => {
+                Some(ClientCommand::Pong)
+            }
             _ => None,
         };
 
@@ -222,7 +226,7 @@ impl NatsBinding {
 
     /// Returns the timestamp when we next expect [Self::handle_recv_ping_timeout] to be called.
     /// i.e. When should the next `PONG` be sent.
-    pub fn poll_recv_ping_timeout(&self) -> Option<Instant> {
+    pub fn poll_send_pong_timeout(&self) -> Option<Instant> {
         let State {
             keep_alive,
             timeouts,
@@ -251,7 +255,7 @@ impl NatsBinding {
         };
 
         let state_change = match keep_alive.last_pong_received_at {
-            Some(received_at) if now.duration_since(received_at) >= timeouts.ping_interval => {
+            Some(received_at) if now.duration_since(received_at) >= timeouts.pong_interval => {
                 Some(ConnState::ConnectionLost)
             }
             _ => None,
@@ -289,18 +293,20 @@ fn info() -> Box<nats_codec::Info> {
 
 #[test]
 fn timeouts() {
+    let ping_interval = Duration::from_secs(2);
+    let pong_interval = Duration::from_secs(3);
+    let pong_delay = Duration::from_secs(5);
+
     let mut binding = NatsBinding::new(Timeouts {
-        ping_interval: Duration::from_secs(2),
-        pong_interval: Duration::from_secs(3),
-        pong_delay: Duration::from_secs(5),
+        ping_interval: ping_interval.clone(),
+        pong_interval: pong_interval.clone(),
+        pong_delay: pong_delay.clone(),
     });
     assert_eq!(binding.state.conn_state, ConnState::AwaitingInfo);
-    let now = Instant::now();
 
-    // Tick 0
-    let tick = now + Duration::from_secs(0);
+    // Tick 0 - setup
+    let tick = Instant::now();
     binding.handle_input(ServerCommand::Info(info()), tick);
-
     assert_eq!(binding.state.conn_state, ConnState::InfoReceived);
     assert!(matches!(
         binding.poll_transmit(),
@@ -308,20 +314,83 @@ fn timeouts() {
     ));
     assert_eq!(binding.poll_transmit(), None);
 
-    // Tick 1
-    let tick = now + Duration::from_secs(1);
-    assert!(binding.handle_send_ping_timeout(tick).is_ok()); // No PING sent so far, but first one is always sent
-    assert!(binding.handle_recv_ping_timeout(tick).is_ok()); // No PING has been received yet
-    assert!(binding.handle_recv_pong_timeout(tick).is_ok()); // No PONG has been received yet
+    let now = Instant::now();
 
-    assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
-    assert_eq!(binding.poll_transmit(), None);
+    // Tick 1 - Enqueue PING, nothing else
+    {
+        let tick = now + Duration::from_secs(1);
 
-    // Tick 2
-    let tick = now + Duration::from_secs(2);
-    assert!(binding.handle_send_ping_timeout(tick).is_ok()); // No PING sent so far
-    assert!(binding.handle_recv_ping_timeout(tick).is_ok()); // No PING has been received yet
-    assert!(binding.handle_recv_pong_timeout(tick).is_ok()); // No PONG has been received yet
+        // No PING sent so far, but first one is always sent
+        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick));
+        assert!(binding.handle_send_ping_timeout(tick).is_ok()); // <-- Enqueues
 
-    assert_eq!(binding.poll_transmit(), None);
+        // No modifications should happen here
+        assert!(binding.handle_send_pong_timeout(tick).is_ok());
+        assert!(binding.handle_recv_pong_timeout(tick).is_ok());
+
+        // Tick 1 - Commands
+        assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
+        assert_eq!(binding.poll_transmit(), None);
+    }
+
+    // Tick 2 - Receive PING, Enqueue PONG within given interval
+    {
+        let tick = now + Duration::from_secs(2);
+        binding.handle_input(ServerCommand::Ping, tick);
+
+        // Expect to send PING in upcoming tick
+        assert_eq!(
+            binding.poll_send_ping_timeout(tick),
+            Some(tick + Duration::from_secs(1))
+        );
+        assert!(binding.handle_send_ping_timeout(tick).is_ok());
+
+        // PING received, expect in upcoming
+        assert_eq!(binding.poll_send_pong_timeout(), Some(tick + pong_delay));
+        assert!(binding.handle_send_pong_timeout(tick).is_ok());
+
+        // Do nothing
+        assert!(binding.handle_recv_pong_timeout(tick).is_ok());
+
+        // Enqueued Commands
+        assert_eq!(binding.poll_transmit(), None);
+    }
+
+    // Tick 3 - Enqueue PING
+    {
+        let tick = now + Duration::from_secs(3);
+
+        // Expect to send PING now
+        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick));
+        assert!(binding.handle_send_ping_timeout(tick).is_ok());
+
+        // Do nothing
+        assert!(binding.handle_send_pong_timeout(tick).is_ok());
+        assert!(binding.handle_recv_pong_timeout(tick).is_ok());
+
+        // Enqueued Commands
+        assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
+        assert_eq!(binding.poll_transmit(), None);
+    }
+
+    // Tick 7
+    // 1. PING was last sent in tick 3, interval is 2 => capture delayed PING!  
+    // 2. PING was received in tick 2, delay is 5, send PONG now
+    {
+        let tick = now + Duration::from_secs(7);
+
+        // Detect delayed PING
+        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick - Duration::from_secs(2)));
+        // Detect punctual PONG
+        assert_eq!(binding.poll_send_pong_timeout(), Some(tick));
+
+        assert!(binding.handle_send_ping_timeout(tick).is_ok());
+        assert!(binding.handle_recv_pong_timeout(tick).is_ok());
+        assert!(binding.handle_send_pong_timeout(tick).is_ok());
+
+        // Enqueued Commands
+        assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
+        assert_eq!(binding.poll_transmit(), Some(ClientCommand::Pong));
+        assert_eq!(binding.poll_transmit(), None);
+    }
 }
