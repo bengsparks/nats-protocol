@@ -20,7 +20,7 @@ use std::sync::{
 };
 use std::{collections::HashMap, net::SocketAddr};
 
-pub use crate::{Subscriber, SubscriptionOptions};
+pub use crate::blind::{Subscriber, SubscriptionOptions};
 
 #[derive(Debug)]
 pub struct SubscriptionRequest {
@@ -211,7 +211,7 @@ impl ConnectionActor {
                         };
 
                         let receiver = if let Some(max_msgs) = options.max_msgs {
-                            ReceiverStream::new(recv).take(max_msgs).boxed()
+                            ReceiverStream::new(recv).take(max_msgs.into()).boxed()
                         } else {
                             ReceiverStream::new(recv).boxed()
                         };

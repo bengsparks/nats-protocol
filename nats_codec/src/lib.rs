@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroUsize};
 
 mod decoder;
 mod decoding;
@@ -174,7 +174,7 @@ pub struct Subscribe {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unsubscribe {
     pub sid: String,
-    pub max_msgs: Option<usize>,
+    pub max_msgs: Option<NonZeroUsize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

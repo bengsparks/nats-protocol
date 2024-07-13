@@ -1,10 +1,10 @@
-use std::task::Poll;
+use std::{num::NonZeroUsize, task::Poll};
 
 use futures::{stream::BoxStream, StreamExt as _};
 use nats_codec::{Message, Unsubscribe};
 use tokio::sync::mpsc;
 
-use crate::ConnectionCommand;
+use crate::blind::ConnectionCommand;
 
 pub struct Subscriber {
     sid: String,
@@ -42,7 +42,7 @@ impl Subscriber {
 
 #[derive(Debug, Default, Clone)]
 pub struct SubscriptionOptions {
-    pub max_msgs: Option<usize>,
+    pub max_msgs: Option<NonZeroUsize>,
     pub queue_group: Option<String>,
 }
 

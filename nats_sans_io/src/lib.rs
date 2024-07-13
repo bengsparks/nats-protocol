@@ -1,44 +1,27 @@
+mod state;
+mod subscription;
+
+pub use state::ConnState;
+pub use subscription::{SubscribeResponse, SubscriptionOptions};
+
+use state::{AwaitingInfo, InfoReceived, Step};
+
 use std::{
-    collections::VecDeque,
+    num::NonZeroUsize,
     time::{Duration, Instant},
 };
 
-use logcall::logcall;
-use nats_codec::{ClientCommand, Connect, ServerCommand};
+use bytes::Bytes;
+use nats_codec::{ClientCommand, ServerCommand};
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
-
 struct State {
     conn_state: ConnState,
-    keep_alive: KeepAliveState,
     timeouts: Timeouts,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConnState {
-    /// First message sent from a server to the client must be [INFO](nats_codec::Info).
-    AwaitingInfo,
-    /// The first message received was [INFO](nats_codec::Info).
-    InfoReceived,
-    /// The first message received was not [INFO](nats_codec::Info),
-    NotInfoReceived,
-    // Server is not responding to `PINGs`
-    ConnectionLost,
-}
-
-#[derive(Debug)]
-struct KeepAliveState {
-    /// Keep-Alive Client: when did the client last check that the server is still alive?
-    last_ping_sent_at: Option<Instant>,
-
-    /// Keep-Alive Server: when did the server last check that the client is still alive?
-    last_ping_received_at: Option<Instant>,
-
-    /// Keep-Alive Server: when did the server last indicate that it is still alive?
-    last_pong_received_at: Option<Instant>,
-}
-
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Timeouts {
     /// How often should a `PING` be sent.
     pub ping_interval: Duration,
@@ -49,112 +32,86 @@ pub struct Timeouts {
 }
 
 #[derive(Debug)]
+pub enum ConnectionCommand {
+    Subscribe {
+        subject: String,
+        options: SubscriptionOptions,
+
+        // `oneshot::Sender::send` is a synchronous function, which makes this ok :)
+        sender: oneshot::Sender<SubscribeResponse>,
+    },
+    Unsubscribe {
+        sid: String,
+        max_msgs: Option<NonZeroUsize>,
+    },
+    Publish {
+        subject: String,
+        payload: Bytes,
+    },
+}
+
+#[derive(Debug)]
 pub struct NatsBinding {
     state: State,
-    buffered_transmits: VecDeque<ClientCommand>,
+}
+
+#[derive(Debug)]
+pub struct ConnectionHandle {
+    pub chan: mpsc::Sender<ConnectionCommand>,
 }
 
 impl NatsBinding {
     pub fn new(timeouts: Timeouts) -> Self {
-        Self {
-            state: State {
-                conn_state: ConnState::AwaitingInfo,
-                keep_alive: KeepAliveState {
-                    last_ping_sent_at: None,
-                    last_pong_received_at: None,
-                    last_ping_received_at: None,
-                },
-                timeouts,
-            },
-            buffered_transmits: VecDeque::new(),
+        let state = State {
+            conn_state: ConnState::AwaitingInfo(AwaitingInfo {
+                preliminary: vec![],
+            }),
+            timeouts,
+        };
+
+        Self { state }
+    }
+
+    pub fn handle_server_input(&mut self, command: ServerCommand, now: Instant) {
+        if let Some(change) = self.state.conn_state.step(command, now) {
+            self.state.conn_state = change;
         }
     }
 
-    pub fn handle_input(&mut self, command: ServerCommand, now: Instant) {
-        let State {
-            conn_state: state,
-            keep_alive,
-            ..
-        } = &mut self.state;
-
-        match (&state, command) {
-            // Awaiting first command from server
-            (ConnState::AwaitingInfo, ServerCommand::Info(_info)) => {
-                self.buffered_transmits
-                    .push_back(ClientCommand::Connect(Connect {
-                        // From INFO
-                        sig: None,
-                        nkey: None,
-                        // Hardcoded
-                        verbose: true,
-                        pedantic: true,
-                        tls_required: false,
-                        auth_token: None,
-                        user: None,
-                        lang: "Rust".into(),
-                        name: None,
-                        pass: None,
-                        version: "1.0".into(),
-                        protocol: None,
-                        echo: None,
-                        jwt: None,
-                        no_responders: None,
-                        headers: Some(true),
-                    }));
-                *state = ConnState::InfoReceived;
-            }
-            (ConnState::AwaitingInfo, _otherwise) => {
-                *state = ConnState::NotInfoReceived;
-            }
-
-            // Connection upheld
-            (ConnState::InfoReceived, ServerCommand::Ok) => {
-                log::trace!("Received OK");
-            }
-            (ConnState::InfoReceived, ServerCommand::Err(error)) => {
-                log::error!("Received error!: {error}");
-            }
-            (ConnState::InfoReceived, ServerCommand::Info(_info)) => {
-                log::warn!("Received new `INFO` during already established connection")
-            }
-            (ConnState::InfoReceived, ServerCommand::Msg(message)) => {
-                log::trace!("Received message: {message:?}");
-            }
-            (ConnState::InfoReceived, ServerCommand::HMsg(message)) => {
-                log::trace!("Received message with headers: {message:?}");
-            }
-            (ConnState::InfoReceived, ServerCommand::Ping) => {
-                log::trace!("Received `PING`");
-                keep_alive.last_ping_received_at = Some(now);
-            }
-            (ConnState::InfoReceived, ServerCommand::Pong) => {
-                log::trace!("Received `PONG`");
-                keep_alive.last_pong_received_at = Some(now);
-            }
-            (ConnState::NotInfoReceived, otherwise) => {
-                log::error!("Received {otherwise:?} despite not having connected!");
-            }
-            (ConnState::ConnectionLost, otherwise) => {
-                log::error!("Received {otherwise:?} despite having lost the connection!");
-            }
-        };
+    pub fn handle_client_input(&mut self, command: ConnectionCommand, now: Instant) {
+        if let Some(change) = self.state.conn_state.step(command, now) {
+            self.state.conn_state = change;
+        }
     }
 
     pub fn poll_transmit(&mut self) -> Option<ClientCommand> {
-        self.buffered_transmits.pop_front()
+        let ConnState::InfoReceived(InfoReceived {
+            buffered_transmits, ..
+        }) = &mut self.state.conn_state
+        else {
+            log::warn!("Cannot send while connection has not been established!");
+            return None;
+        };
+        let command = buffered_transmits.pop_front();
+        log::trace!("Polled {command:?}");
+        command
     }
 
     /// What happens when [Self::poll_send_ping_timeout]'s timestamp is exceeded
-    #[logcall(err = "error")]
-    pub fn handle_send_ping_timeout(&mut self, now: Instant) -> Result<(), ConnState> {
+    pub fn handle_send_ping_timeout(&mut self, now: Instant) {
         let State {
-            keep_alive,
             timeouts,
             conn_state,
+            ..
         } = &mut self.state;
 
-        let ConnState::InfoReceived = conn_state else {
-            return Err(conn_state.clone());
+        let ConnState::InfoReceived(InfoReceived {
+            buffered_transmits,
+            keep_alive,
+            ..
+        }) = conn_state
+        else {
+            return;
         };
 
         let command = match keep_alive.last_ping_sent_at {
@@ -166,24 +123,22 @@ impl NatsBinding {
         };
 
         if let Some(command) = command {
-            self.buffered_transmits.push_back(command);
+            buffered_transmits.push_back(command);
             keep_alive.last_ping_sent_at = Some(now);
             log::trace!("Enqueued `PING`");
         }
-
-        Ok(())
     }
 
     /// Returns the timestamp when we next expect [Self::handle_send_ping_timeout] to be called.
     /// i.e. When should the next `PING` be sent.
     pub fn poll_send_ping_timeout(&self, now: Instant) -> Option<Instant> {
         let State {
-            keep_alive,
             timeouts,
             conn_state,
+            ..
         } = &self.state;
 
-        let ConnState::InfoReceived = conn_state else {
+        let ConnState::InfoReceived(InfoReceived { keep_alive, .. }) = conn_state else {
             return None;
         };
 
@@ -196,16 +151,20 @@ impl NatsBinding {
     }
 
     /// What happens when [Self::poll_recv_ping_timeout]'s timestamp is exceeded.
-    #[logcall(err = "error")]
-    pub fn handle_send_pong_timeout(&mut self, now: Instant) -> Result<(), ConnState> {
+    pub fn handle_send_pong_timeout(&mut self, now: Instant) {
         let State {
-            keep_alive,
             timeouts,
             conn_state,
+            ..
         } = &mut self.state;
 
-        let ConnState::InfoReceived = conn_state else {
-            return Err(conn_state.clone());
+        let ConnState::InfoReceived(InfoReceived {
+            buffered_transmits,
+            keep_alive,
+            ..
+        }) = conn_state
+        else {
+            return;
         };
 
         let command = match keep_alive.last_ping_received_at {
@@ -216,24 +175,22 @@ impl NatsBinding {
         };
 
         if let Some(pong) = command {
-            self.buffered_transmits.push_back(pong);
+            buffered_transmits.push_back(pong);
             keep_alive.last_ping_received_at = None;
             log::trace!("Enqueued `PONG`");
         }
-
-        Ok(())
     }
 
     /// Returns the timestamp when we next expect [Self::handle_recv_ping_timeout] to be called.
     /// i.e. When should the next `PONG` be sent.
     pub fn poll_send_pong_timeout(&self) -> Option<Instant> {
         let State {
-            keep_alive,
             timeouts,
             conn_state,
+            ..
         } = &self.state;
 
-        let ConnState::InfoReceived = conn_state else {
+        let ConnState::InfoReceived(InfoReceived { keep_alive, .. }) = conn_state else {
             return None;
         };
         keep_alive
@@ -242,41 +199,40 @@ impl NatsBinding {
     }
 
     /// What happens when [Self::poll_recv_pong_timeout]'s timestamp is exceeded.
-    #[logcall(err = "error")]
-    pub fn handle_recv_pong_timeout(&mut self, now: Instant) -> Result<(), ConnState> {
+    pub fn handle_recv_pong_timeout(&mut self, now: Instant) {
         let State {
             conn_state,
-            keep_alive,
             timeouts,
+            ..
         } = &mut self.state;
 
-        let ConnState::InfoReceived = conn_state else {
-            return Err(conn_state.clone());
+        let ConnState::InfoReceived(InfoReceived { keep_alive, .. }) = conn_state else {
+            return;
         };
 
-        let state_change = match keep_alive.last_pong_received_at {
+        match keep_alive.last_pong_received_at {
+            // Please stabilise if-let chains soon :)
             Some(received_at) if now.duration_since(received_at) >= timeouts.pong_interval => {
-                Some(ConnState::ConnectionLost)
+                log::error!(
+                    "Connection lost! It has been over {}s since the NATS server sent a PONG",
+                    timeouts.pong_interval.as_secs_f64()
+                );
+                *conn_state = ConnState::ConnectionLost
             }
-            _ => None,
+            _ => {}
         };
-
-        if let Some(change) = state_change {
-            *conn_state = change;
-        }
-        Ok(())
     }
 
     /// Returns the timestamp when we next expect [Self::handle_recv_ping_timeout] to be called.
     /// i.e. When should the server have sent its next PONG by.
     pub fn poll_recv_pong_timeout(&self) -> Option<Instant> {
         let State {
-            keep_alive,
             timeouts,
             conn_state,
+            ..
         } = &self.state;
 
-        let ConnState::InfoReceived = conn_state else {
+        let ConnState::InfoReceived(InfoReceived { keep_alive, .. }) = conn_state else {
             return None;
         };
 
@@ -302,11 +258,16 @@ fn timeouts() {
         pong_interval: pong_interval.clone(),
         pong_delay: pong_delay.clone(),
     });
-    assert_eq!(binding.state.conn_state, ConnState::AwaitingInfo);
+    assert_eq!(
+        binding.state.conn_state,
+        ConnState::AwaitingInfo {
+            preliminary: vec![]
+        }
+    );
 
     // Tick 0 - setup
     let tick = Instant::now();
-    binding.handle_input(ServerCommand::Info(info()), tick);
+    binding.handle_server_input(ServerCommand::Info(info()), tick);
     assert_eq!(binding.state.conn_state, ConnState::InfoReceived);
     assert!(matches!(
         binding.poll_transmit(),
@@ -336,7 +297,7 @@ fn timeouts() {
     // Tick 2 - Receive PING, Enqueue PONG within given interval
     {
         let tick = now + Duration::from_secs(2);
-        binding.handle_input(ServerCommand::Ping, tick);
+        binding.handle_server_input(ServerCommand::Ping, tick);
 
         // Expect to send PING in upcoming tick
         assert_eq!(
@@ -373,14 +334,25 @@ fn timeouts() {
         assert_eq!(binding.poll_transmit(), None);
     }
 
+    // Tick 5
+    // TODO: Capture Connection Lost due to not receiving PONG soon enough.
+    {
+        let tick = now + Duration::from_secs(5);
+
+        assert_eq!(binding.)
+    }
+
     // Tick 7
-    // 1. PING was last sent in tick 3, interval is 2 => capture delayed PING!  
+    // 1. PING was last sent in tick 3, interval is 2 => capture delayed PING!
     // 2. PING was received in tick 2, delay is 5, send PONG now
     {
         let tick = now + Duration::from_secs(7);
 
         // Detect delayed PING
-        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick - Duration::from_secs(2)));
+        assert_eq!(
+            binding.poll_send_ping_timeout(tick),
+            Some(tick - Duration::from_secs(2))
+        );
         // Detect punctual PONG
         assert_eq!(binding.poll_send_pong_timeout(), Some(tick));
 
@@ -393,4 +365,14 @@ fn timeouts() {
         assert_eq!(binding.poll_transmit(), Some(ClientCommand::Pong));
         assert_eq!(binding.poll_transmit(), None);
     }
+}
+
+#[cfg(test)]
+struct StepExpectations {}
+
+#[cfg(test)]
+fn ok_step(binding: &mut NatsBinding, start: Instant, tick: Duration) {
+    let now = start + tick;
+
+    assert_eq!(binding.handle_send_ping_timeout(now).is_ok());
 }

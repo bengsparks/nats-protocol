@@ -1,15 +1,15 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, num::NonZeroUsize};
 
 use clap::Parser;
 use tokio_stream::StreamExt;
 
-use nats_client::{Connection, SubscriptionOptions};
+use nats_client::blind::*;
 
 #[derive(Parser)]
 struct Cli {
     socket: SocketAddr,
     subject: String,
-    max_msgs: Option<usize>,
+    max_msgs: Option<NonZeroUsize>,
 }
 
 #[tokio::main]
@@ -31,6 +31,6 @@ async fn main() {
 
     let sid = atlanta.sid().clone();
     while let Some(message) = atlanta.next().await {
-        log::info!("[{sid}]: {message:?}")
+        println!("[{sid}]: {message:?}")
     }
 }

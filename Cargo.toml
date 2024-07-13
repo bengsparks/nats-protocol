@@ -8,4 +8,5 @@ tokio-stream = { version = "0.1.15", default-features = false}
 tokio-util = { version = "0.7.11", default-features = false }
 
 nats_codec = { path = "./nats_codec" }
+nats_sans_io = { path = "./nats_sans_io" }
 log = "0.4"

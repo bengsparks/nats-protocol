@@ -3,7 +3,7 @@ use std::{net::SocketAddr, time::Duration};
 use chrono::{FixedOffset, TimeZone as _};
 use clap::Parser;
 
-use nats_client::Connection;
+use nats_client::blind::*;
 
 #[derive(Parser)]
 struct Cli {
@@ -17,7 +17,7 @@ async fn main() {
     let Cli { socket, subject } = Cli::parse();
 
     let mut connection = Connection::connect(socket).await;
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
 
     let offset = FixedOffset::east_opt(5 * 60 * 60).unwrap();
 
