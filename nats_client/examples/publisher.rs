@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 
 use chrono::{FixedOffset, TimeZone as _};
 use clap::Parser;
@@ -9,15 +9,18 @@ use nats_client::tokio::NatsOverTcp;
 
 #[derive(Parser)]
 struct Cli {
-    socket: SocketAddr,
+    host: String,
+    port: u16,
     subject: String,
 }
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let Cli { socket, subject } = Cli::parse();
-    let tcp = TcpStream::connect(socket)
+    let Cli { host, port, subject } = Cli::parse();
+
+    log::info!("Connecting to {host}:{port}");
+    let tcp = TcpStream::connect((host, port))
         .await
         .expect("Failed to connect to TCP socket");
 

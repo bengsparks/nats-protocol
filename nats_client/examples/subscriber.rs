@@ -1,4 +1,3 @@
-use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -30,16 +29,8 @@ async fn main() {
         queue_group,
     } = Cli::parse();
 
-    let Ok(Some(socket)) = format!("{host}:{port}")
-        .to_socket_addrs()
-        .map(|mut i| i.next())
-    else {
-        log::error!("Failed to resolve {host}:{port}");
-        return;
-    };
-    log::info!("Connecting to {socket}");
-
-    let tcp = TcpStream::connect(socket)
+    log::info!("Connecting to {host}:{port}");
+    let tcp = TcpStream::connect((host, port))
         .await
         .expect("Failed to connect to TCP socket");
 

@@ -89,7 +89,6 @@ impl NatsBinding {
             buffered_transmits, ..
         }) = &mut self.state.conn_state
         else {
-            log::warn!("Cannot send while connection has not been established!");
             return None;
         };
         let command = buffered_transmits.pop_front();
