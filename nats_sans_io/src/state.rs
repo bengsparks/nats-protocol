@@ -208,7 +208,7 @@ impl Step<ConnectionCommand> for ConnState {
             ) => {
                 let subscriber = sid2subscriber.remove(&sid);
                 if subscriber.is_none() {
-                    log::warn!("Cannot unsubscribe {sid} because it is unknown")
+                    log::warn!("Cannot unsubscribe {sid} because it is unknown");
                 }
                 buffered_transmits.push_back(ClientCommand::Unsubscribe(nats_codec::Unsubscribe {
                     sid,

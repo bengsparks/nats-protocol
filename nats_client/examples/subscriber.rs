@@ -1,18 +1,19 @@
+use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 
 use clap::Parser;
 
 use futures::StreamExt;
 use tokio::net::TcpStream;
-
-use nats_client::tokio::NatsOverTcp;
-use nats_client::tokio::SubscriptionOptions;
 use tokio::sync::mpsc;
+
+use nats_client::tokio::{NatsOverTcp, SubscriptionOptions};
 
 #[derive(Parser)]
 struct Cli {
-    socket: SocketAddr,
+    host: String,
+    port: u16,
     subject: String,
     max_msgs: Option<NonZeroUsize>,
     queue_group: Option<String>,
@@ -22,11 +23,21 @@ struct Cli {
 async fn main() {
     env_logger::init();
     let Cli {
-        socket,
+        host,
+        port,
         subject,
         max_msgs,
         queue_group,
     } = Cli::parse();
+
+    let Ok(Some(socket)) = format!("{host}:{port}")
+        .to_socket_addrs()
+        .map(|mut i| i.next())
+    else {
+        log::error!("Failed to resolve {host}:{port}");
+        return;
+    };
+    log::info!("Connecting to {socket}");
 
     let tcp = TcpStream::connect(socket)
         .await

@@ -62,7 +62,7 @@ async fn main() {
             }
             command = reader.next() => {
                 match command {
-                    Some(Ok(command)) => binding.handle_input(command, Instant::now()),
+                    Some(Ok(command)) => binding.handle_server_input(command, Instant::now()),
                     Some(Err(e)) => log::error!("Server produced invalid command: {e:?}"),
                     None => {
                         log::error!("NATS Server disconnected TCP Stream");

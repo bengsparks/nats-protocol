@@ -426,6 +426,8 @@ mod publish {
 
 #[cfg(test)]
 mod subscribe {
+    use std::num::NonZeroUsize;
+
     use crate::ClientCodec;
     use tokio_stream::StreamExt;
     use tokio_util::codec::FramedRead;
@@ -478,7 +480,7 @@ mod subscribe {
             reader.try_next().await.unwrap(),
             Some(crate::ClientCommand::Unsubscribe(crate::Unsubscribe {
                 sid: "1".into(),
-                max_msgs: Some(5),
+                max_msgs: NonZeroUsize::new(5),
             }))
         );
         assert_eq!(reader.try_next().await.unwrap(), None);

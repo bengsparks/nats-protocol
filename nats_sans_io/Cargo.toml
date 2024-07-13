@@ -3,9 +3,6 @@ name = "nats_sans_io"
 version = "0.1.0"
 edition = "2021"
 
-[[example]]
-name = "tokio"
-
 [dependencies]
 log = { workspace = true }
 tokio = { workspace = true, features = [    

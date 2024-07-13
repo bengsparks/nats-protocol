@@ -4,16 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [[example]]
-name = "tokio-subscriber"
+name = "subscriber"
 
 [[example]]
-name = "tokio-publisher"
-
-[[example]]
-name = "blind-subscriber"
-
-[[example]]
-name = "blind-publisher"
+name = "publisher"
 
 [dependencies]
 log = { workspace = true }
