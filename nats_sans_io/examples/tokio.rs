@@ -30,7 +30,7 @@ async fn main() {
     let mut binding = NatsBinding::new(Timeouts {
         ping_interval: Duration::from_secs(1),
         pong_delay: Duration::from_secs(0),
-        pong_interval: Duration::from_secs(30),
+        keep_alive: Duration::from_secs(30),
     });
 
     log::info!("Starting event loop");
@@ -58,7 +58,7 @@ async fn main() {
                 let _ = binding.handle_send_pong_timeout(time.into());
             }
             time = recv_pong_ticker.tick() => {
-                let _ = binding.handle_recv_pong_timeout(time.into());
+                let _ = binding.handle_keep_alive_timeout(time.into());
             }
             command = reader.next() => {
                 match command {
@@ -80,7 +80,7 @@ async fn main() {
             recv_ping_ticker.reset_at(tick.into());
         }
 
-        if let Some(tick) = binding.poll_recv_pong_timeout() {
+        if let Some(tick) = binding.poll_keep_alive_timeout() {
             recv_pong_ticker.reset_at(tick.into());
         }
     }

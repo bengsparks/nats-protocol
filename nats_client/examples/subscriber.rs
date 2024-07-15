@@ -41,7 +41,7 @@ async fn main() {
         let timeouts = nats_sans_io::Timeouts {
             ping_interval: Duration::from_secs(15),
             pong_delay: Duration::from_secs(0),
-            pong_interval: Duration::from_secs(30),
+            keep_alive: Duration::from_secs(30),
         };
         let _ = protocol.run(timeouts, send).await.unwrap();
     });

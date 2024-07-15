@@ -76,7 +76,7 @@ impl NatsOverTcp {
                     let _ = binding.handle_send_pong_timeout(time.into());
                 }
                 time = recv_pong_ticker.tick() => {
-                    let _ = binding.handle_recv_pong_timeout(time.into());
+                    let _ = binding.handle_keep_alive_timeout(time.into());
                 }
                 Some(command) = receiver.recv() => {
                     binding.handle_client_input(command, Instant::now());
@@ -101,7 +101,7 @@ impl NatsOverTcp {
                 recv_ping_ticker.reset_at(tick.into());
             }
 
-            if let Some(tick) = binding.poll_recv_pong_timeout() {
+            if let Some(tick) = binding.poll_keep_alive_timeout() {
                 recv_pong_ticker.reset_at(tick.into());
             }
         }

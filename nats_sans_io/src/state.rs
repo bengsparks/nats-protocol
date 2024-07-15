@@ -22,9 +22,9 @@ pub enum ConnState {
     ConnectionLost,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AwaitingInfo {
-    pub preliminary: Vec<nats_codec::ClientCommand>,
+    pub preliminary: Vec<(ConnectionCommand, Instant)>,
 }
 
 #[derive(Debug)]
@@ -56,7 +56,9 @@ impl Step<ServerCommand> for ConnState {
         let new_state = match (self, command) {
             (ConnState::AwaitingInfo(AwaitingInfo { preliminary }), ServerCommand::Info(_info)) => {
                 // https://doc.rust-lang.org/std/collections/struct.VecDeque.html#method.from
-                let mut buffered_transmits: VecDeque<_> = std::mem::take(preliminary).into();
+                let preliminary = std::mem::take(preliminary);
+
+                let mut buffered_transmits: VecDeque<_> = VecDeque::with_capacity(preliminary.len());
 
                 buffered_transmits.push_front(ClientCommand::Connect(Connect {
                     // From INFO
@@ -79,7 +81,7 @@ impl Step<ServerCommand> for ConnState {
                     headers: Some(true),
                 }));
 
-                Some(ConnState::InfoReceived(InfoReceived {
+                let s = ConnState::InfoReceived(InfoReceived {
                     buffered_transmits,
                     keep_alive: KeepAliveState {
                         last_ping_sent_at: None,
@@ -88,7 +90,13 @@ impl Step<ServerCommand> for ConnState {
                     },
                     sid_generator: AtomicU64::new(1),
                     sid2subscriber: HashMap::new(),
-                }))
+                });
+
+                let replayed = preliminary.into_iter().fold(s, |mut s, (backlog, _when)| {
+                    s.step(backlog, now).unwrap_or(s)
+                });
+
+                Some(replayed)
             }
             (ConnState::AwaitingInfo { .. }, _otherwise) => Some(ConnState::NotInfoReceived),
 
@@ -156,7 +164,7 @@ impl Step<ServerCommand> for ConnState {
 }
 
 impl Step<ConnectionCommand> for ConnState {
-    fn step(&mut self, command: ConnectionCommand, _now: Instant) -> Option<ConnState> {
+    fn step(&mut self, command: ConnectionCommand, now: Instant) -> Option<ConnState> {
         match (self, command) {
             (
                 ConnState::InfoReceived(InfoReceived {
@@ -226,8 +234,8 @@ impl Step<ConnectionCommand> for ConnState {
                 bytes: payload.len(),
                 payload,
             })),
-            (ConnState::AwaitingInfo { .. }, command) => {
-                log::error!("Discarding {command:?}; Cannot enqueue client commands when connection has not yet been established");
+            (ConnState::AwaitingInfo(AwaitingInfo { preliminary }), command) => {
+                preliminary.push((command, now));
             }
             (ConnState::NotInfoReceived | ConnState::ConnectionLost, command) => {
                 log::error!("Discarding {command:?}; protocol error occurred");

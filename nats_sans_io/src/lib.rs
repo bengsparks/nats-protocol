@@ -12,7 +12,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use nats_codec::{ClientCommand, ServerCommand};
+use nats_codec::{ClientCommand, Publish, ServerCommand};
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -25,10 +25,12 @@ struct State {
 pub struct Timeouts {
     /// How often should a `PING` be sent.
     pub ping_interval: Duration,
-    /// How long should the elapsed period between receiving `PING` and enqueueing `PONG` be.
+    /// How long should the minimum elapsed period between receiving `PING` and enqueueing `PONG` be.
     pub pong_delay: Duration,
-    /// How often should a `PONG` be received from the server.
-    pub pong_interval: Duration,
+    /// How long should the maximum elapsed period between receiving `PONG`s from the server.
+    /// Should be larger than [Self::ping_interval], as each `PONG` stems from a `PING`, i.e. you cannot receive
+    /// `PONG` more often / sooner than a `PING`
+    pub keep_alive: Duration,
 }
 
 #[derive(Debug)]
@@ -197,8 +199,8 @@ impl NatsBinding {
             .map(|i| i + timeouts.pong_delay)
     }
 
-    /// What happens when [Self::poll_recv_pong_timeout]'s timestamp is exceeded.
-    pub fn handle_recv_pong_timeout(&mut self, now: Instant) {
+    /// What happens when [Self::poll_keep_alive_timeout]'s timestamp is exceeded.
+    pub fn handle_keep_alive_timeout(&mut self, now: Instant) {
         let State {
             conn_state,
             timeouts,
@@ -211,10 +213,10 @@ impl NatsBinding {
 
         match keep_alive.last_pong_received_at {
             // Please stabilise if-let chains soon :)
-            Some(received_at) if now.duration_since(received_at) >= timeouts.pong_interval => {
+            Some(received_at) if now.duration_since(received_at) >= timeouts.keep_alive => {
                 log::error!(
                     "Connection lost! It has been over {}s since the NATS server sent a PONG",
-                    timeouts.pong_interval.as_secs_f64()
+                    timeouts.keep_alive.as_secs_f64()
                 );
                 *conn_state = ConnState::ConnectionLost
             }
@@ -222,9 +224,9 @@ impl NatsBinding {
         };
     }
 
-    /// Returns the timestamp when we next expect [Self::handle_recv_ping_timeout] to be called.
+    /// Returns the timestamp when we next expect [Self::handle_keep_alive_timeout] to be called.
     /// i.e. When should the server have sent its next PONG by.
-    pub fn poll_recv_pong_timeout(&self) -> Option<Instant> {
+    pub fn poll_keep_alive_timeout(&self) -> Option<Instant> {
         let State {
             timeouts,
             conn_state,
@@ -237,7 +239,7 @@ impl NatsBinding {
 
         keep_alive
             .last_pong_received_at
-            .map(|i| i + timeouts.pong_interval)
+            .map(|i| i + timeouts.keep_alive)
     }
 }
 
@@ -248,140 +250,233 @@ fn info() -> Box<nats_codec::Info> {
 
 #[test]
 fn timeouts() {
+    // How often do we send PING
     let ping_interval = Duration::from_secs(2);
-    let pong_interval = Duration::from_secs(3);
-    let pong_delay = Duration::from_secs(5);
+    // How long do we allow to wait for sending PONG in response to PING
+    let pong_delay = Duration::from_secs(0);
+    // How long do we wait for receiving a PONG
+    let keep_alive = Duration::from_secs(3);
+
+    // Tick 0 - setup
+    let now = Instant::now();
 
     let mut binding = NatsBinding::new(Timeouts {
         ping_interval: ping_interval.clone(),
-        pong_interval: pong_interval.clone(),
         pong_delay: pong_delay.clone(),
+        keep_alive: keep_alive.clone(),
     });
     assert!(matches!(
         binding.state.conn_state,
         ConnState::AwaitingInfo(_)
     ));
 
-    // Tick 0 - setup
-    let tick = Instant::now();
-    binding.handle_server_input(ServerCommand::Info(info()), tick);
-    assert!(matches!(
-        binding.state.conn_state,
-        ConnState::InfoReceived(_)
-    ));
-    assert!(matches!(
-        binding.poll_transmit(),
-        Some(ClientCommand::Connect(_))
-    ));
-    assert_eq!(binding.poll_transmit(), None);
+    {
+        let tick = now + Duration::from_secs(0);
+        step(
+            &mut binding,
+            tick,
+            StepExpectations {
+                poll_send_ping: None,
+                poll_send_pong: None,
+                poll_keep_alive: None,
+                //enqueued: vec![ClientCommand::Connect(_)],
+            },
+        );
 
-    let now = Instant::now();
+        assert_eq!(binding.poll_transmit(), None);
+    }
 
-    // Tick 1 - Enqueue PING, nothing else
+    // Tick 1 - Receive INFO, PING tick is also triggered
     {
         let tick = now + Duration::from_secs(1);
+        binding.handle_server_input(ServerCommand::Info(info()), tick);
 
-        // No PING sent so far, but first one is always sent
-        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick));
+        step(
+            &mut binding,
+            tick,
+            StepExpectations {
+                poll_send_ping: Some(tick),
+                poll_send_pong: None,
+                poll_keep_alive: None,
+            },
+        );
 
-        binding.handle_send_ping_timeout(tick); // <-- Enqueues
-
-        // No modifications should happen here
-        binding.handle_send_pong_timeout(tick);
-        binding.handle_recv_pong_timeout(tick);
-
-        // Tick 1 - Commands
+        assert!(matches!(
+            binding.poll_transmit(),
+            Some(ClientCommand::Connect(_))
+        ));
         assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
         assert_eq!(binding.poll_transmit(), None);
     }
 
-    // Tick 2 - Receive PING, Enqueue PONG within given interval
+    // Tick 2 - Receive PONG
     {
         let tick = now + Duration::from_secs(2);
-        binding.handle_server_input(ServerCommand::Ping, tick);
+        binding.handle_server_input(ServerCommand::Pong, tick);
 
-        // Expect to send PING in upcoming tick
-        assert_eq!(
-            binding.poll_send_ping_timeout(tick),
-            Some(tick + Duration::from_secs(1))
+        step(
+            &mut binding,
+            tick,
+            StepExpectations {
+                // Send PING based on last tick + interval
+                poll_send_ping: Some(tick + ping_interval - Duration::from_secs(1)),
+                poll_send_pong: None,
+                // Expect next PONG within given interval
+                poll_keep_alive: Some(tick + keep_alive),
+            },
         );
 
-        // PING received, expect in upcoming
-        assert_eq!(binding.poll_send_pong_timeout(), Some(tick + pong_delay));
-
-        binding.handle_send_ping_timeout(tick);
-        binding.handle_send_pong_timeout(tick);
-        binding.handle_recv_pong_timeout(tick);
-
-        // Enqueued Commands
         assert_eq!(binding.poll_transmit(), None);
     }
 
-    // Tick 3 - Enqueue PING
+    // Tick 3 - PING was sent in tick 1, so we expect it now.
+    // Also, receive PING from server at this time to later send PONG
     {
         let tick = now + Duration::from_secs(3);
+        binding.handle_server_input(ServerCommand::Ping, tick);
 
-        // Expect to send PING now
-        assert_eq!(binding.poll_send_ping_timeout(tick), Some(tick));
-        binding.handle_send_ping_timeout(tick);
-
-        // Do nothing
-        binding.handle_send_ping_timeout(tick);
-        binding.handle_send_pong_timeout(tick);
-        binding.handle_recv_pong_timeout(tick);
-
-        // Enqueued Commands
-        assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
-        assert_eq!(binding.poll_transmit(), None);
-    }
-
-    // Tick 7
-    // 1. PING was last sent in tick 3, interval is 2 => capture delayed PING!
-    // 2. PING was received in tick 2, delay is 5, send PONG now
-    {
-        let tick = now + Duration::from_secs(7);
-
-        // Detect delayed PING
-        assert_eq!(
-            binding.poll_send_ping_timeout(tick),
-            Some(tick - Duration::from_secs(2))
+        step(
+            &mut binding,
+            tick,
+            StepExpectations {
+                poll_send_ping: Some(tick),
+                poll_send_pong: Some(tick), // Receiving PING immediately starts send PONG
+                poll_keep_alive: Some(tick + keep_alive - Duration::from_secs(1)),
+            },
         );
-        // Detect punctual PONG
-        assert_eq!(binding.poll_send_pong_timeout(), Some(tick));
 
-        binding.handle_send_ping_timeout(tick);
-        binding.handle_recv_pong_timeout(tick);
-        binding.handle_send_pong_timeout(tick);
-
-        // Enqueued Commands
         assert_eq!(binding.poll_transmit(), Some(ClientCommand::Ping));
         assert_eq!(binding.poll_transmit(), Some(ClientCommand::Pong));
         assert_eq!(binding.poll_transmit(), None);
     }
 
-    // Capture Connection Lost due to not receiving PONG soon enough.
-    /*
+    // Tick 7 - PING was sent in tick 3, and we do not receive a PONG for > 3 ticks, therefore the connection is "lost"
     {
-        let tick = now + (Duration::from_secs(7 + 1) + pong_interval);
+        let tick = now + Duration::from_secs(7);
 
-        assert_eq!(binding.poll_recv_pong_timeout(), Some(tick - Duration::from_secs(1)));
+        step(
+            &mut binding,
+            tick,
+            StepExpectations {
+                poll_send_ping: Some(tick - Duration::from_secs(2)), // <-- overdue PING
+                poll_send_pong: None,                                // <--- No PING has been sent
+                poll_keep_alive: Some(tick + keep_alive - Duration::from_secs(5)), // <-- no PONG has been received!
+            },
+        );
 
-        binding.handle_send_ping_timeout(tick);
-        binding.handle_recv_pong_timeout(tick);
-        binding.handle_send_pong_timeout(tick);
-
+        assert_eq!(binding.poll_transmit(), None);
         assert!(matches!(
             binding.state.conn_state,
             ConnState::ConnectionLost
-        ))
+        ));
     }
-    */
+}
+
+#[test]
+fn retain_preemptive_messages() {
+    let tick = Instant::now();
+
+    let mut binding = NatsBinding::new(Timeouts {
+        ping_interval: Duration::from_secs(10),
+        pong_delay: Duration::from_secs(10),
+        keep_alive: Duration::from_secs(10),
+    });
+    assert!(matches!(
+        binding.state.conn_state,
+        ConnState::AwaitingInfo(_)
+    ));
+
+    binding.handle_client_input(
+        ConnectionCommand::Publish {
+            subject: "preemptive".into(),
+            payload: Bytes::from_static(b"Hello World!"),
+        },
+        tick,
+    );
+
+    let (sender, mut receiver) = oneshot::channel();
+    binding.handle_client_input(
+        ConnectionCommand::Subscribe {
+            subject: "preemptive".into(),
+            options: SubscriptionOptions {
+                max_msgs: NonZeroUsize::new(5),
+                queue_group: None,
+            },
+            sender,
+        },
+        tick,
+    );
+
+    binding.handle_server_input(ServerCommand::Info(info()), tick);
+    assert!(matches!(
+        binding.state.conn_state,
+        ConnState::InfoReceived(_)
+    ));
+
+    assert!(matches!(
+        binding.poll_transmit(),
+        Some(ClientCommand::Connect(_))
+    ));
+    assert_eq!(
+        binding.poll_transmit(),
+        Some(ClientCommand::Publish(Publish {
+            subject: "preemptive".into(),
+            reply_to: None,
+            bytes: "Hello World!".len(),
+            payload: Bytes::from_static(b"Hello World!")
+        }))
+    );
+    assert!(matches!(
+        binding.poll_transmit(),
+        Some(ClientCommand::Subscribe(_))
+    ));
+    assert!(matches!(
+        binding.poll_transmit(),
+        Some(ClientCommand::Unsubscribe(_))
+    ));
+    assert!(matches!(binding.poll_transmit(), None));
+
+    let _response = receiver.try_recv().unwrap();
 }
 
 #[cfg(test)]
-struct StepExpectations {}
+struct StepExpectations {
+    poll_send_ping: Option<Instant>,
+    poll_send_pong: Option<Instant>,
+    poll_keep_alive: Option<Instant>,
+    // enqueued: Vec<ClientCommand>,
+}
 
 #[cfg(test)]
-fn ok_step(binding: &mut NatsBinding, start: Instant, tick: Duration) {
-    let now = start + tick;
+fn step(binding: &mut NatsBinding, tick: Instant, expectations: StepExpectations) {
+    assert_eq!(
+        binding.poll_send_ping_timeout(tick),
+        expectations.poll_send_ping,
+        "Wrong PING timeout"
+    );
+    assert_eq!(
+        binding.poll_send_pong_timeout(),
+        expectations.poll_send_pong,
+        "Wrong PONG timeout"
+    );
+    assert_eq!(
+        binding.poll_keep_alive_timeout(),
+        expectations.poll_keep_alive,
+        "Wrong Keep-Alive timeout!"
+    );
+
+    binding.handle_send_ping_timeout(tick);
+    binding.handle_send_pong_timeout(tick);
+    binding.handle_keep_alive_timeout(tick);
+
+    /*
+    let mut msgs = expectations.enqueued.into_iter();
+
+    while let Some((enqueued, expected)) = binding.poll_transmit().zip(msgs.next()) {
+        assert_eq!(enqueued, expected);
+    }
+
+    assert_eq!(binding.poll_transmit(), None);
+    assert_eq!(msgs.next(), None);
+    */
 }
