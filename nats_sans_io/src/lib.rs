@@ -12,7 +12,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use nats_codec::{ClientCommand, Publish, ServerCommand};
+use nats_codec::{ClientCommand, ServerCommand};
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug)]
@@ -419,7 +419,7 @@ fn retain_preemptive_messages() {
     ));
     assert_eq!(
         binding.poll_transmit(),
-        Some(ClientCommand::Publish(Publish {
+        Some(ClientCommand::Publish(nats_codec::Publish {
             subject: "preemptive".into(),
             reply_to: None,
             bytes: "Hello World!".len(),

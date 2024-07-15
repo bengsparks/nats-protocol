@@ -3,7 +3,7 @@ use std::time::Duration;
 use chrono::{FixedOffset, TimeZone as _};
 use clap::Parser;
 
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{net::TcpStream, sync::oneshot};
 
 use nats_client::tokio::NatsOverTcp;
 
@@ -25,7 +25,7 @@ async fn main() {
         .expect("Failed to connect to TCP socket");
 
     let protocol = NatsOverTcp::new(tcp);
-    let (send, mut recv) = mpsc::channel(64);
+    let (send, recv) = oneshot::channel();
 
     let conn_task = tokio::spawn(async move {
         let timeouts = nats_sans_io::Timeouts {
@@ -37,7 +37,7 @@ async fn main() {
     });
 
     let user_task = tokio::spawn(async move {
-        let client = recv.recv().await.unwrap();
+        let client = recv.await.unwrap();
         let offset = FixedOffset::east_opt(5 * 60 * 60).unwrap();
 
         let mut interval = tokio::time::interval(Duration::from_secs(1));

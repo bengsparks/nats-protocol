@@ -35,7 +35,7 @@ impl NatsOverTcp {
     pub async fn run(
         self,
         timeouts: nats_sans_io::Timeouts,
-        chan: mpsc::Sender<UserHandle>,
+        chan: oneshot::Sender<UserHandle>,
     ) -> Result<(), NatsError> {
         let Self {
             conn: tcp,
@@ -55,14 +55,9 @@ impl NatsOverTcp {
 
         let mut binding = NatsBinding::new(timeouts);
 
+        chan.send(UserHandle { chan: sender.clone() }).unwrap();
         loop {
             if let Some(transmit) = binding.poll_transmit() {
-                if matches!(transmit, nats_codec::ClientCommand::Connect(_)) {
-                    let handle = UserHandle {
-                        chan: sender.clone(),
-                    };
-                    chan.try_send(handle).unwrap();
-                }
                 let _ = writer.send(transmit).await;
                 continue;
             }
