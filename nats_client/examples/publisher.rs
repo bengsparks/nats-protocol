@@ -61,7 +61,7 @@ async fn main() {
     };
 
 
-    let mut interval = tokio::time::interval(Duration::from_secs(3));
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
     while let Some(timestamp) = stream.next().await {
         interval.tick().await;
         println!("{timestamp}");

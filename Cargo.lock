@@ -631,19 +631,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nats_server"
-version = "0.1.0"
-dependencies = [
- "memchr",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util",
-]
-
-[[package]]
 name = "nkeys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
