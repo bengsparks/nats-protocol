@@ -45,20 +45,17 @@ async fn main() {
         let _ = protocol.run(timeouts, send).await.unwrap();
     });
 
-    let user_task = tokio::spawn(async move {
-        let client = recv.await.unwrap();
-        let options = SubscriptionOptions {
-            max_msgs,
-            queue_group: queue_group.clone(),
-        };
+    let client = recv.await.unwrap();
+    let options = SubscriptionOptions {
+        max_msgs,
+        queue_group: queue_group.clone(),
+    };
 
-        let mut subscriber = client.subscribe(subject.clone(), options).await;
-        while let Some(message) = subscriber.next().await {
-            println!("{message:?}");
-        }
+    let mut subscriber = client.subscribe(subject.clone(), options).await;
+    while let Some(message) = subscriber.next().await {
+        println!("{message:?}");
+    }
 
-        log::info!("Subscriber completed");
-    });
-
-    let _ = tokio::try_join!(conn_task, user_task);
+    log::info!("Subscriber completed");
+    conn_task.abort();
 }

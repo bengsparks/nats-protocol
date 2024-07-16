@@ -18,18 +18,11 @@ pub enum NatsError {}
 
 pub struct NatsOverTcp {
     conn: TcpStream,
-    sender: mpsc::Sender<nats_sans_io::ConnectionCommand>,
-    receiver: mpsc::Receiver<nats_sans_io::ConnectionCommand>,
 }
 
 impl NatsOverTcp {
     pub fn new(tcp: TcpStream) -> Self {
-        let (sender, receiver) = mpsc::channel(1024 * 1024);
-        Self {
-            conn: tcp,
-            sender,
-            receiver,
-        }
+        Self { conn: tcp }
     }
 
     pub async fn run(
@@ -37,11 +30,7 @@ impl NatsOverTcp {
         timeouts: nats_sans_io::Timeouts,
         chan: oneshot::Sender<UserHandle>,
     ) -> Result<(), NatsError> {
-        let Self {
-            conn: tcp,
-            sender,
-            mut receiver,
-        } = self;
+        let Self { conn: tcp } = self;
         let (reader, writer) = tcp.into_split();
 
         let (mut reader, mut writer) = (
@@ -55,7 +44,12 @@ impl NatsOverTcp {
 
         let mut binding = NatsBinding::new(timeouts);
 
-        chan.send(UserHandle { chan: sender.clone() }).unwrap();
+        let (sender, mut receiver) = mpsc::channel(1024 * 1024);
+        chan.send(UserHandle {
+            chan: sender.clone(),
+        })
+        .unwrap();
+
         loop {
             if let Some(transmit) = binding.poll_transmit() {
                 let _ = writer.send(transmit).await;
@@ -149,5 +143,14 @@ impl UserHandle {
             })
             .await
             .unwrap();
+    }
+
+    pub async fn close(self) {
+        /* 
+        self.chan
+            .send(nats_sans_io::ConnectionCommand::Close)
+            .await
+            .unwrap();
+        */
     }
 }

@@ -58,7 +58,8 @@ impl Step<ServerCommand> for ConnState {
                 // https://doc.rust-lang.org/std/collections/struct.VecDeque.html#method.from
                 let preliminary = std::mem::take(preliminary);
 
-                let mut buffered_transmits: VecDeque<_> = VecDeque::with_capacity(preliminary.len());
+                let mut buffered_transmits: VecDeque<_> =
+                    VecDeque::with_capacity(preliminary.len());
 
                 buffered_transmits.push_front(ClientCommand::Connect(Connect {
                     // From INFO
