@@ -3,7 +3,7 @@ resolver = "2"
 members = ["nats_client", "nats_sans_io", "nats_codec"]
 
 [workspace.dependencies]
-tokio = { version = "1.38.0", default-features = false }
+tokio = { version = "1.38.2", default-features = false }
 tokio-stream = { version = "0.1.15", default-features = false} 
 tokio-util = { version = "0.7.11", default-features = false }
 
